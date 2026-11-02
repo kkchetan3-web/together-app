@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0f1115;color:#eee;font-family:system-ui,sans-serif}
+  .box{width:100%;max-width:420px;padding:24px;display:grid;gap:12px;text-align:center}
+  h1{margin:0 0 8px}
+  h3{margin:12px 0 0;color:#a29bfe}
+  p{margin:0;color:#888;font-size:13px}
+  input,button{padding:14px;border-radius:10px;border:0;font-size:16px;width:100%}
+  button{background:#6c5ce7;color:#fff}
+  button.alt{background:#2d3140}
+  #err{color:#ff7675;font-size:14px;display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>🎬 Together</h1>
+  <div id="err">Couldn't connect. Check that the link is the newest one and that the host's server is running.</div>
+
+  <h3>Join your partner</h3>
+  <p>Paste the invite link they sent you</p>
+  <input id="linkIn" placeholder="https://....trycloudflare.com/?room=ABC123" autocapitalize="off" autocorrect="off">
+  <button id="joinBtn">Join</button>
+
+  <h3>I'm the host</h3>
+  <p>Start the server in Termux first</p>
+  <button id="hostBtn" class="alt">Open my server (this tablet)</button>
+</div>
+<script>
+  var q = new URLSearchParams(location.search);
+  if (q.get('error')) document.getElementById('err').style.display = 'block';
+  var inp = document.getElementById('linkIn');
+  inp.value = localStorage.getItem('lastLink') || '';
+  document.getElementById('joinBtn').onclick = function () {
+    var v = inp.value.trim();
+    if (!v) return;
+    if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+    localStorage.setItem('lastLink', v);
+    location.href = v;
+  };
+  document.getElementById('hostBtn').onclick = function () {
+    location.href = 'http://localhost:3000';
+  };
+</script>
+</body>
+</html>
