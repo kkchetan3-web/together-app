@@ -19,10 +19,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.9'
+            - name: Decode Keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+      - name: Bump version code
+        run: sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" app/build.gradle
+
       - name: Build
-        run: gradle assembleDebug --no-daemon
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
       - name: Rename
-        run: cp app/build/outputs/apk/debug/app-debug.apk Together.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Together.apk
       - uses: actions/upload-artifact@v4
         with:
           name: Together-APK
