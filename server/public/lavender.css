@@ -37,6 +37,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 /* LOBBY */
 #lobby{max-width:420px;margin:9vh auto;padding:38px 32px;display:grid;gap:16px;text-align:center;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);position:relative;z-index:10}
 #lobby h1{font-size:34px;font-weight:700;letter-spacing:-0.6px;background:linear-gradient(135deg,#ffffff 25%,var(--accent-2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.lobby-status{font-size:13px;color:var(--text-muted);min-height:18px}
+.lobby-status.ok{color:#7EE2A8}
+.lobby-status.error{color:#FF9AAE}
 
 /* APP GRID */
 #app{display:none;height:100dvh;grid-template-columns:1fr 360px;gap:12px;padding:12px}

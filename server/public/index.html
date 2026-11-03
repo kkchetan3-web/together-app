@@ -44,6 +44,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 /* LOBBY */
 #lobby{max-width:420px;margin:9vh auto;padding:38px 32px;display:grid;gap:16px;text-align:center;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);position:relative;z-index:10}
 #lobby h1{font-size:34px;font-weight:700;letter-spacing:-0.6px;background:linear-gradient(135deg,#ffffff 25%,var(--accent-2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.lobby-status{font-size:13px;color:var(--text-muted);min-height:18px}
+.lobby-status.ok{color:#7EE2A8}
+.lobby-status.error{color:#FF9AAE}
 
 /* APP GRID */
 #app{display:none;height:100dvh;grid-template-columns:1fr 360px;gap:12px;padding:12px}
@@ -139,10 +142,11 @@ body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !imp
 
 <div id="lobby">
 <h1>🎬 Together</h1>
+<p id="lobbyStatus" class="lobby-status">Connecting to server…</p>
 <input id="name" placeholder="Your name (optional)">
-<button id="create">Create a room</button>
+<button id="create" disabled>Create a room</button>
 <input id="codeIn" placeholder="Room code">
-<button id="join">Join room</button>
+<button id="join" disabled>Join room</button>
 </div>
 
 <div id="app">
@@ -211,12 +215,21 @@ body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !imp
 <div id="maxBackdrop" onclick="minimizeAllCams()"></div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script src="/vendor/hls.min.js"></script>
 <script>
 const $=(id)=>document.getElementById(id);
-const socket=io();
+const socket=io({reconnection:true,timeout:10000});
 $('app').style.display='none';
 $('lobby').style.display='grid';
+function setLobbyStatus(msg,kind){
+const el=$('lobbyStatus');if(!el)return;
+el.textContent=msg;el.className='lobby-status'+(kind?' '+kind:'');
+}
+function setBusy(busy){
+$('create').disabled=busy||!socket.connected;
+$('join').disabled=busy||!socket.connected;
+}
+setBusy(true);
 
 const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
 fetch('/ice').then(r=>r.json()).then(list=>{ICE.iceServers=list}).catch(()=>{});
@@ -235,7 +248,8 @@ el.className='call-status '+((state==='connected'||state==='completed')?'ok':(st
 }
 
 const video=$('player');
-const cid=localStorage.cid||(localStorage.cid=Math.random().toString(36).slice(2)+Date.now().toString(36));
+// Per-tab identity: lets you test host + partner in two tabs of the same browser.
+const cid=sessionStorage.cid||(sessionStorage.cid=Math.random().toString(36).slice(2)+Date.now().toString(36));
 
 let room,myName='Me',polite=false,pc;
 let localStream=null,screenStream=null,screenSenders=[];
@@ -244,12 +258,22 @@ let remote=false,hls=null,resumeAfter=false;
 let playlist=[],currentIdx=-1;
 let callSpeakerOn=true;
 let uploadInProgress=false;
+let joining=false;
+socket.on('disconnect',()=>{
+if(room)sys('Connection lost. Reconnecting…');
+else setLobbyStatus('Disconnected from server. Reconnecting…','error');
+setBusy(true);
+});
+socket.on('connect_error',()=>{
+if(!room)setLobbyStatus('Cannot reach server. Retrying…','error');
+});
 
 function applyCallSpeaker(on){
 callSpeakerOn=on;
 const btn=$('callSpeakerBtn');
-if(btn){btn.textContent=on?'🔊 Call':'📞 Earpiece';btn.title=on?'Call audio: Speaker':'Call audio: Earpiece'}
+if(btn){btn.textContent=on?'🔊 Call':'🔇 Muted';btn.title=on?'Call audio: Speaker':'Call audio: Muted'}
 if(window.AndroidSpeaker&&window.AndroidSpeaker.setCallSpeaker){try{window.AndroidSpeaker.setCallSpeaker(on)}catch(e){}}
+else{const them=$('them');if(them)them.muted=!on}
 }
 $('callSpeakerBtn').onclick=()=>applyCallSpeaker(!callSpeakerOn);
 
@@ -285,19 +309,19 @@ document.querySelectorAll('.btnHide').forEach(btn => {
         if (box.classList.contains('hidden')) {
             box.classList.remove('hidden');
             e.target.textContent = 'Hide';
-            if (cam === 'me') {
+if (cam === 'me' && pc) {
                 const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
                 if (sender && localStream) {
                     const videoTrack = localStream.getVideoTracks()[0];
-                    if (videoTrack) sender.replaceTrack(videoTrack);
+                    if (videoTrack) sender.replaceTrack(videoTrack).catch(()=>{});
                 }
             }
         } else {
             box.classList.add('hidden');
             e.target.textContent = 'Show';
-            if (cam === 'me') {
+            if (cam === 'me' && pc) {
                 const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                if (sender) sender.replaceTrack(null);
+                if (sender) sender.replaceTrack(null).catch(()=>{});
             }
         }
     };
@@ -331,7 +355,7 @@ const q=$('queue');if(!q)return;
 if(!playlist.length){q.className='';q.innerHTML='';return}
 q.className='has';
 q.innerHTML='<div class="qtitle">Episodes</div>'+
-playlist.map((it,i)=>'<div class="item'+(i===currentIdx?' cur':'')+'" data-idx="'+i+'"><span class="n">'+(i+1)+'.</span><span class="t">'+it.name+'</span></div>').join('');
+playlist.map((it,i)=>'<div class="item'+(i===currentIdx?' cur':'')+'" data-idx="'+i+'"><span class="n">'+(i+1)+'.</span><span class="t">'+esc(it.name)+'</span></div>').join('');
 q.querySelectorAll('.item').forEach(el=>{
 el.onclick=()=>playIdx(Number(el.dataset.idx));
 });
@@ -352,14 +376,29 @@ if(urlRoom)$('codeIn').value=urlRoom;
 
 $('create').onclick=()=>enter(Math.random().toString(36).slice(2,8).toUpperCase(),true);
 $('join').onclick=()=>enter($('codeIn').value.trim().toUpperCase(),false);
+$('codeIn').addEventListener('keydown',(e)=>{if(e.key==='Enter')$('join').click()});
+
+function joinRoom(code,create){
+return new Promise((resolve,reject)=>{
+if(!socket.connected)return reject(new Error('Not connected to server yet.'));
+socket.timeout(8000).emit('join',{room:code,create,cid},(err,res)=>{
+if(err)return reject(new Error('Server did not answer. Is the Termux server running?'));
+if(!res)return reject(new Error('Empty server response.'));
+if(res.error)return reject(new Error(res.error));
+resolve(res);
+});
+});
+}
 
 async function enter(code,create){
-if(!code)return alert('Enter a room code');
+if(joining)return;
+code=String(code||'').trim().toUpperCase();
+if(!/^[A-Z0-9]{4,12}$/.test(code))return setLobbyStatus('Enter a 4–12 letter/number room code.','error');
 myName=$('name').value.trim()||anonId;
-try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:{facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720}}})}
-catch{try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}catch{localStream=null}}
-socket.emit('join',{room:code,create,cid},(res)=>{
-if(res.error)return alert(res.error);
+joining=true;setBusy(true);
+setLobbyStatus(create?'Creating room…':'Joining room…');
+try{
+const res=await joinRoom(code,create);
 room=code;
 $('lobby').style.display='none';
 $('app').style.display='grid';
@@ -368,7 +407,6 @@ forceSpeakerRoute();
 if(res.peerName){const pn=$('peerName');if(pn)pn.textContent=res.peerName}
 $('myNameInput').value=myName;
 socket.emit('set-name',{name:myName});
-if(localStream)$('me').srcObject=localStream;
 if(res.url){
 loadSource(res.url);addSubs(res.subs);
 if(!playlist.some(p=>p.url===res.url)){
@@ -377,16 +415,57 @@ currentIdx=0;
 renderQueue();
 }
 }
-sys('Room '+code+'. Waiting for your partner...');
-history.replaceState({},'','?room='+code);
+sys('Room '+code+(res.created?' created':' joined')+'. Waiting for your partner...');
+try{history.replaceState({},'','?room='+code)}catch(e){}
+ensureLocalMedia();
+}catch(err){
+setLobbyStatus(err.message||'Could not enter room.','error');
+}finally{
+joining=false;setBusy(false);
+}
+}
+
+async function ensureLocalMedia(){
+if(localStream){$('me').srcObject=localStream;syncLocalTracks();return}
+if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+sys('Camera/mic is not available in this browser. You can still watch and chat.');
+return;
+}
+try{
+localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:{facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720}}});
+}catch(e){
+try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}
+catch(e2){localStream=null}
+}
+if(localStream){$('me').srcObject=localStream;syncLocalTracks()}
+else sys('Camera/mic permission was denied or unavailable. You can still watch and chat.');
+}
+
+function syncLocalTracks(){
+if(!pc||!localStream)return;
+localStream.getTracks().forEach(track=>{
+const tr=pc.getTransceivers().find(t=>t.receiver&&t.receiver.track&&t.receiver.track.kind===track.kind);
+if(tr){
+if(tr.sender.track!==track)tr.sender.replaceTrack(track).catch(()=>{});
+try{tr.direction='sendrecv'}catch(e){}
+}else{
+pc.addTrack(track,localStream);
+}
 });
 }
 
 socket.on('connect',()=>{
-if(!room)return;
-socket.emit('join',{room,create:true,cid},(res)=>{
-if(res&&res.error)sys('Reconnect problem: '+res.error);
-else{sys('Reconnected ✅');socket.emit('set-name',{name:myName})}
+setLobbyStatus('Connected. Create or join a room.','ok');
+if(!room){setBusy(false);return}
+setBusy(true);
+joinRoom(room,true).then(res=>{
+sys('Reconnected ✅');
+socket.emit('set-name',{name:myName});
+if(res.peerName){const pn=$('peerName');if(pn)pn.textContent=res.peerName}
+setBusy(false);
+}).catch(err=>{
+sys('Reconnect problem: '+err.message);
+setBusy(false);
 });
 });
 
@@ -552,7 +631,7 @@ $('msg').value='';
 };
 socket.on('chat',({name,text})=>addLine('<b>'+esc(name)+':</b> '+esc(text)));
 
-socket.on('ready',({polite:p})=>{sys('Partner connected 🎉');createPeer(p);socket.emit('set-name',{name:myName});setTimeout(()=>applyCallSpeaker(true),500);setTimeout(()=>applyCallSpeaker(true),2000)});
+socket.on('ready',({polite:p})=>{sys('Partner connected 🎉');createPeer(p);syncLocalTracks();socket.emit('set-name',{name:myName});setTimeout(()=>applyCallSpeaker(true),500);setTimeout(()=>applyCallSpeaker(true),2000)});
 socket.on('peer-left',()=>{
 sys('Partner left (they may be reconnecting)');
 setCallStatus('closed');
@@ -569,7 +648,7 @@ setCallStatus('checking');
 pc.onconnectionstatechange=()=>setCallStatus(pc.connectionState);
 pc.oniceconnectionstatechange=()=>{if(pc.iceConnectionState==='failed'){try{pc.restartIce()}catch(e){}}setCallStatus(pc.iceConnectionState)};
 if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-else{pc.addTransceiver('audio',{direction:'recvonly'});pc.addTransceiver('video',{direction:'recvonly'})}
+else{pc.addTransceiver('audio',{direction:'sendrecv'});pc.addTransceiver('video',{direction:'sendrecv'})}
 pc.ontrack=(e)=>{
 const stream=e.streams[0];
 if(stream&&stream.id===remoteScreenId){
