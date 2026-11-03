@@ -2,13 +2,16 @@ package com.together.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -18,7 +21,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,6 +37,7 @@ public class MainActivity extends Activity {
     private WebChromeClient.CustomViewCallback customCallback;
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermission;
+    private AudioManager audioManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,6 +46,7 @@ public class MainActivity extends Activity {
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0f1115"));
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
@@ -60,7 +64,6 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 return false;
             }
-
             @Override
             public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
                 if (r.isForMainFrame()) v.loadUrl(LAUNCHER + "?error=1");
@@ -127,6 +130,9 @@ public class MainActivity extends Activity {
         };
         web.setWebChromeClient(chrome);
 
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        web.addJavascriptInterface(new SpeakerBridge(), "AndroidSpeaker");
+
         web.loadUrl(LAUNCHER);
     }
 
@@ -164,9 +170,9 @@ public class MainActivity extends Activity {
 
     private void immersive(boolean on) {
         getWindow().getDecorView().setSystemUiVisibility(on
-                ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                  | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                : View.SYSTEM_UI_FLAG_VISIBLE);
+            ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+              | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            : View.SYSTEM_UI_FLAG_VISIBLE);
     }
 
     @Override
@@ -184,5 +190,24 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (web != null) web.destroy();
         super.onDestroy();
+    }
+
+    public class SpeakerBridge {
+        @JavascriptInterface
+        public void setSpeakerOn(final boolean on) {
+            runOnUiThread(() -> {
+                try {
+                    if (audioManager == null) return;
+                    if (on) {
+                        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                        audioManager.setSpeakerphoneOn(true);
+                    } else {
+                        audioManager.setMode(AudioManager.MODE_NORMAL);
+                        audioManager.setSpeakerphoneOn(false);
+                    }
+                } catch (Exception e) {
+                }
+            });
+        }
     }
 }
