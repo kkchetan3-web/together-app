@@ -1,48 +1,168 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F4F1FD">
+<title>Together</title>
 <style>
-  *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-       background:#0f1115;color:#eee;font-family:system-ui,sans-serif}
-  .box{width:100%;max-width:420px;padding:24px;display:grid;gap:12px;text-align:center}
-  h1{margin:0 0 8px}
-  h3{margin:12px 0 0;color:#a29bfe}
-  p{margin:0;color:#888;font-size:13px}
-  input,button{padding:14px;border-radius:10px;border:0;font-size:16px;width:100%}
-  button{background:#6c5ce7;color:#fff}
-  button.alt{background:#2d3140}
-  #err{color:#ff7675;font-size:14px;display:none}
+  /* ============================================================
+     Together · Lavender Glass
+     One UI 8.5-inspired design language (Galaxy S26 Ultra):
+     generous rounded cards, one-handed bottom-weighted actions,
+     soft edge blur, graceful gradients, embossed controls.
+     ============================================================ */
+  :root{
+    --bg:#F4F1FD;
+    --ink-900:#241E3E; --ink-600:#5A5378; --ink-400:#8E87A8;
+    --lav-300:#C9B8F5; --lav-500:#9F86EE; --lav-600:#8B6FE8; --brand:#6C5CE7;
+    --glass:rgba(255,255,255,.58); --glass-border:rgba(255,255,255,.72);
+    --glass-shadow:0 10px 34px rgba(108,92,231,.14);
+    --grad-cta:linear-gradient(135deg,#A78BFA 0%,#7C6AEF 52%,#6C5CE7 100%);
+    --danger:#F0506E;
+    --r-card:28px; --r-btn:20px; --r-input:16px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#161226;
+      --ink-900:#F1EDFC; --ink-600:#B9B1D6; --ink-400:#7E76A0;
+      --glass:rgba(40,33,70,.55); --glass-border:rgba(255,255,255,.10);
+      --glass-shadow:0 10px 34px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    min-height:100vh;background:var(--bg);color:var(--ink-900);
+    font-family:"SamsungOne","Samsung Sans",-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }
+  /* Ambient lavender aurora */
+  .ambient{position:fixed;inset:0;z-index:-1;overflow:hidden;
+    background:linear-gradient(160deg,#F6F2FF 0%,#EFE9FC 45%,#E9E4FA 100%)}
+  @media (prefers-color-scheme:dark){
+    .ambient{background:linear-gradient(160deg,#17122B 0%,#1B1533 50%,#141024 100%)}
+  }
+  .blob{position:absolute;border-radius:50%;filter:blur(70px);opacity:.55;animation:drift 20s ease-in-out infinite alternate}
+  .b1{width:340px;height:340px;left:-90px;top:-70px;background:#CBB7FF}
+  .b2{width:300px;height:300px;right:-100px;top:22%;background:#E3D4FF;animation-delay:-7s}
+  .b3{width:380px;height:380px;left:12%;bottom:-160px;background:#B9A4F7;animation-delay:-13s}
+  @media (prefers-color-scheme:dark){.blob{opacity:.28}}
+  @keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(26px,-20px) scale(1.08)}}
+  /* One UI 8.5 soft edge blur */
+  .edge-blur{position:fixed;left:0;right:0;top:0;height:34px;z-index:5;pointer-events:none;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    -webkit-mask-image:linear-gradient(to bottom,#000,transparent);mask-image:linear-gradient(to bottom,#000,transparent)}
+  .page{max-width:460px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 40px) 20px calc(env(safe-area-inset-bottom,0px) + 28px)}
+  /* Hero — big One UI page title */
+  .hero{padding:6px 8px 26px}
+  .logo{width:58px;height:58px;border-radius:19px;display:flex;align-items:center;justify-content:center;
+    background:var(--grad-cta);box-shadow:0 10px 26px rgba(108,92,231,.38),inset 0 1px 0 rgba(255,255,255,.45);
+    margin-bottom:20px}
+  .logo svg{width:28px;height:28px;fill:#fff}
+  h1{margin:0;font-size:40px;line-height:1.08;font-weight:700;letter-spacing:-.6px}
+  .sub{margin:10px 0 0;color:var(--ink-600);font-size:15.5px;line-height:1.45}
+  /* Glass cards */
+  .card{background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--r-card);
+    box-shadow:var(--glass-shadow);backdrop-filter:blur(24px) saturate(1.5);-webkit-backdrop-filter:blur(24px) saturate(1.5);
+    padding:22px;margin-bottom:16px}
+  .card h2{margin:0 0 6px;font-size:19px;font-weight:700;letter-spacing:-.2px}
+  .card p{margin:0 0 16px;color:var(--ink-600);font-size:13.5px;line-height:1.5}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;letter-spacing:.4px;
+    text-transform:uppercase;color:var(--brand);background:rgba(108,92,231,.12);
+    border:1px solid rgba(108,92,231,.18);padding:5px 11px;border-radius:999px;margin-bottom:12px}
+  @media (prefers-color-scheme:dark){.chip{color:#C9B8F5;background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.22)}}
+  /* Inputs */
+  .field{position:relative;margin-bottom:14px}
+  input{width:100%;padding:16px 44px 16px 16px;border-radius:var(--r-input);font-size:15px;
+    color:var(--ink-900);background:rgba(255,255,255,.62);border:1.5px solid rgba(108,92,231,.18);
+    outline:none;transition:border-color .2s,box-shadow .2s,background .2s}
+  @media (prefers-color-scheme:dark){input{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.12)}}
+  input::placeholder{color:var(--ink-400)}
+  input:focus{border-color:var(--lav-500);box-shadow:0 0 0 4px rgba(159,134,238,.18);background:rgba(255,255,255,.85)}
+  @media (prefers-color-scheme:dark){input:focus{background:rgba(255,255,255,.10)}}
+  .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:30px;height:30px;padding:0;
+    border:0;border-radius:50%;background:rgba(108,92,231,.12);color:var(--ink-600);font-size:13px;
+    display:none;align-items:center;justify-content:center;cursor:pointer}
+  /* Buttons — embossed gradient, One UI press feel */
+  .btn{width:100%;padding:17px 18px;border:0;border-radius:var(--r-btn);font-size:16px;font-weight:700;
+    font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:transform .16s ease,box-shadow .16s ease,filter .16s ease}
+  .btn:active{transform:scale(.97);filter:brightness(.96)}
+  .btn.primary{color:#fff;background:var(--grad-cta);
+    box-shadow:0 10px 24px rgba(108,92,231,.35),inset 0 1px 0 rgba(255,255,255,.4)}
+  .btn.ghost{color:var(--brand);background:rgba(108,92,231,.10);border:1.5px solid rgba(108,92,231,.22)}
+  @media (prefers-color-scheme:dark){.btn.ghost{color:#C9B8F5;background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25)}}
+  .btn svg{width:18px;height:18px;fill:currentColor}
+  /* Error toast */
+  #err{display:none;align-items:flex-start;gap:10px;background:var(--glass);border:1px solid var(--glass-border);
+    border-left:4px solid var(--danger);border-radius:18px;padding:14px 16px;margin-bottom:16px;
+    color:var(--ink-600);font-size:13.5px;line-height:1.45;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+  #err b{color:var(--danger)}
+  footer{margin-top:22px;text-align:center;color:var(--ink-400);font-size:12px;letter-spacing:.2px}
 </style>
 </head>
 <body>
-<div class="box">
-  <h1>🎬 Together</h1>
-  <div id="err">Couldn't connect. Check that the link is the newest one and that the host's server is running.</div>
+<div class="ambient" aria-hidden="true"><i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i></div>
+<div class="edge-blur" aria-hidden="true"></div>
 
-  <h3>Join your partner</h3>
-  <p>Paste the invite link they sent you</p>
-  <input id="linkIn" placeholder="https://....trycloudflare.com/?room=ABC123" autocapitalize="off" autocorrect="off">
-  <button id="joinBtn">Join</button>
+<main class="page">
+  <header class="hero">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>
+    </div>
+    <h1>Together</h1>
+    <p class="sub">Watch side by side, miles apart. Start a room or join the person waiting for you.</p>
+  </header>
 
-  <h3>I'm the host</h3>
-  <p>Start the server in Termux first</p>
-  <button id="hostBtn" class="alt">Open my server (this tablet)</button>
-</div>
+  <div id="err" role="alert"><span>⚠️</span><span><b>Couldn't connect.</b> Check that the invite link is the newest one and that the host's server is running in Termux.</span></div>
+
+  <section class="card">
+    <span class="chip">💜 Join a room</span>
+    <h2>Join your partner</h2>
+    <p>Paste the invite link they sent you.</p>
+    <div class="field">
+      <input id="linkIn" placeholder="https://….trycloudflare.com/?room=ABC123" autocapitalize="off" autocorrect="off" autocomplete="off" inputmode="url">
+      <button class="clear" id="clearBtn" aria-label="Clear">✕</button>
+    </div>
+    <button id="joinBtn" class="btn primary">
+      Join room
+      <svg viewBox="0 0 24 24"><path d="M12 4l-1.4 1.4L16.2 11H4v2h12.2l-5.6 5.6L12 20l8-8z"/></svg>
+    </button>
+  </section>
+
+  <section class="card">
+    <span class="chip">🖥️ Host</span>
+    <h2>Hosting on this device?</h2>
+    <p>Start the server in Termux first, then open it here.</p>
+    <button id="hostBtn" class="btn ghost">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+      Open my server
+    </button>
+  </section>
+
+  <footer>Together · Lavender Glass 💜</footer>
+</main>
+
 <script>
   var q = new URLSearchParams(location.search);
-  if (q.get('error')) document.getElementById('err').style.display = 'block';
+  if (q.get('error')) document.getElementById('err').style.display = 'flex';
   var inp = document.getElementById('linkIn');
+  var clearBtn = document.getElementById('clearBtn');
   inp.value = localStorage.getItem('lastLink') || '';
-  document.getElementById('joinBtn').onclick = function () {
+  function syncClear(){ clearBtn.style.display = inp.value ? 'flex' : 'none'; }
+  syncClear();
+  inp.addEventListener('input', syncClear);
+  clearBtn.onclick = function(){ inp.value=''; syncClear(); inp.focus(); };
+  function join(){
     var v = inp.value.trim();
-    if (!v) return;
+    if (!v) { inp.focus(); return; }
     if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
     localStorage.setItem('lastLink', v);
     location.href = v;
-  };
+  }
+  document.getElementById('joinBtn').onclick = join;
+  inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') join(); });
   document.getElementById('hostBtn').onclick = function () {
     location.href = 'http://localhost:3000';
   };

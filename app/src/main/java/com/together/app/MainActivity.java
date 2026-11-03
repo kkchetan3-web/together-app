@@ -6,13 +6,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -38,19 +43,26 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermission;
     private AudioManager audioManager;
+    private AudioFocusRequest focusRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
+        // Lavender Glass: match the launcher background so there is no dark flash.
+        int bg = Color.parseColor("#F4F1FD");
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(bg);
 
         web = new WebView(this);
-        web.setBackgroundColor(Color.parseColor("#0f1115"));
+        web.setBackgroundColor(bg);
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
+
+        // Lets you debug the room / video-call page from a desktop browser
+        // via chrome://inspect while the phone/tablet is plugged in.
+        WebView.setWebContentsDebuggingEnabled(true);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -66,7 +78,23 @@ public class MainActivity extends Activity {
             }
             @Override
             public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                if (r.isForMainFrame()) v.loadUrl(LAUNCHER + "?error=1");
+                // Only bounce back to the launcher for real connection failures of
+                // the main page. Subresource hiccups must never kill a live call.
+                if (!r.isForMainFrame()) return;
+                int c = e.getErrorCode();
+                boolean connectionFailure = c == ERROR_HOST_LOOKUP || c == ERROR_CONNECT
+                        || c == ERROR_TIMEOUT || c == ERROR_IO || c == ERROR_UNKNOWN;
+                String url = r.getUrl() != null ? r.getUrl().toString() : "";
+                if (connectionFailure && !url.startsWith("file:///android_asset")) {
+                    v.loadUrl(LAUNCHER + "?error=1");
+                }
+            }
+            @Override
+            public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
+                // Renderer crashed (can happen with camera + video). Recover the
+                // whole activity instead of leaving a frozen screen.
+                recreate();
+                return true;
             }
         });
 
@@ -78,8 +106,14 @@ public class MainActivity extends Activity {
                     for (String r : req.getResources()) {
                         if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r) && !has(Manifest.permission.CAMERA))
                             need.add(Manifest.permission.CAMERA);
-                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r) && !has(Manifest.permission.RECORD_AUDIO))
-                            need.add(Manifest.permission.RECORD_AUDIO);
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) {
+                            if (!has(Manifest.permission.RECORD_AUDIO))
+                                need.add(Manifest.permission.RECORD_AUDIO);
+                            // Android 12+: routing call audio to a Bluetooth headset
+                            // needs this. Optional — never blocks the call itself.
+                            if (Build.VERSION.SDK_INT >= 31 && !has(Manifest.permission.BLUETOOTH_CONNECT))
+                                need.add(Manifest.permission.BLUETOOTH_CONNECT);
+                        }
                     }
                     if (need.isEmpty()) {
                         answer(req);
@@ -187,36 +221,89 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        if (web != null) web.onPause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) web.onResume();
+    }
+
+    @Override
     protected void onDestroy() {
+        stopCallAudio();
         if (web != null) web.destroy();
         super.onDestroy();
     }
 
+    /* ---------------- Call audio ----------------
+       WebRTC inside a WebView plays through the media stream by default,
+       which causes quiet earpiece audio and echo. The room page calls
+       AndroidSpeaker.setSpeakerOn(true) when a call starts; we then switch
+       the whole device into communication mode, take audio focus, and route
+       to the loudspeaker using the modern API on Android 12+. */
+
+    private void startCallAudio() {
+        try {
+            if (audioManager == null) return;
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            if (focusRequest == null) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(attrs)
+                        .setOnAudioFocusChangeListener(f -> { })
+                        .build();
+            }
+            audioManager.requestAudioFocus(focusRequest);
+            routeSpeaker(true);
+        } catch (Exception e) { }
+    }
+
+    private void stopCallAudio() {
+        try {
+            if (audioManager == null) return;
+            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
+            audioManager.setSpeakerphoneOn(false);
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+            if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
+        } catch (Exception e) { }
+    }
+
+    private void routeSpeaker(boolean speaker) {
+        try {
+            if (audioManager == null) return;
+            if (Build.VERSION.SDK_INT >= 31) {
+                AudioDeviceInfo target = null;
+                for (AudioDeviceInfo d : audioManager.getAvailableCommunicationDevices()) {
+                    int t = d.getType();
+                    if (speaker && t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { target = d; break; }
+                    if (!speaker && t == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) { target = d; break; }
+                }
+                if (target != null) audioManager.setCommunicationDevice(target);
+            } else {
+                audioManager.setSpeakerphoneOn(speaker);
+            }
+        } catch (Exception e) { }
+    }
+
     public class SpeakerBridge {
+        // Keep the original JS API so the existing room page keeps working.
         @JavascriptInterface
         public void setCallSpeaker(final boolean on) {
-            runOnUiThread(() -> {
-                try {
-                    if (audioManager == null) return;
-                    audioManager.setSpeakerphoneOn(on);
-                } catch (Exception e) {}
-            });
+            runOnUiThread(() -> routeSpeaker(on));
         }
 
         @JavascriptInterface
         public void setSpeakerOn(final boolean on) {
             runOnUiThread(() -> {
-                try {
-                    if (audioManager == null) return;
-                    if (on) {
-                        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                        audioManager.setSpeakerphoneOn(true);
-                    } else {
-                        audioManager.setMode(AudioManager.MODE_NORMAL);
-                        audioManager.setSpeakerphoneOn(false);
-                    }
-                } catch (Exception e) {
-                }
+                if (on) startCallAudio();
+                else stopCallAudio();
             });
         }
     }
