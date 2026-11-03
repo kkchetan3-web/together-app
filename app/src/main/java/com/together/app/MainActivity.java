@@ -194,7 +194,6 @@ public class MainActivity extends Activity {
 
     public class SpeakerBridge {
         @JavascriptInterface
-        @JavascriptInterface
         public void setCallSpeaker(final boolean on) {
             runOnUiThread(() -> {
                 try {
