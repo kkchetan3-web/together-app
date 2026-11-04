@@ -163,7 +163,7 @@ body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !imp
 <div id="app">
 <div id="stage">
 <div id="views">
-<video id="player" controls controlsList="nofullscreen nodownload" playsinline></video>
+<video id="player" controls controlsList="nodownload" playsinline></video>
 <video id="screen" autoplay playsinline controls></video>
 </div>
 
@@ -404,7 +404,7 @@ if (cam === 'me' && pc) {
 });
 
 // MOVIE FULLSCREEN
-$('fs').onclick=()=>{
+function toggleMovieFs(){
 if(document.body.classList.contains('is-fullscreen')){
 document.body.classList.remove('is-fullscreen');
 $('fs').textContent='⛶';
@@ -412,8 +412,10 @@ $('fs').textContent='⛶';
 document.body.classList.add('is-fullscreen');
 $('fs').textContent='↙';
 }
-};
-video.addEventListener('dblclick', (e) => e.preventDefault());
+}
+$('fs').onclick=toggleMovieFs;
+// Double-tap / double-click the movie itself to toggle fit-to-screen fullscreen.
+video.addEventListener('dblclick', (e) => { e.preventDefault(); toggleMovieFs(); });
 
 const anonId='Anon-'+Math.random().toString(36).slice(2,6).toUpperCase();
 function applyMyName(n){
