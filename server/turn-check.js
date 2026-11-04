@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /* Dependency-free TURN connectivity + credential tester (verbose).
  * Performs a real TURN Allocate (RFC 5766 long-term credential) over UDP/TCP/TLS.
+ * IMPORTANT: the 401 challenge and the authenticated Allocate are sent over the
+ * SAME socket / connection (same 5-tuple), as a real TURN client does.
  * Usage:
  *   node turn-check.js                  # reads ./turn.txt
  *   node turn-check.js /path/turn.txt
  *   TURN_USER=u TURN_PASS=p node turn-check.js      # test metered defaults
- *   node turn-check.js --control        # test PUBLIC openrelay (network control)
+ *   node turn-check.js --openrelay      # quota-free public relay (REST minted)
+ *   node turn-check.js --control        # legacy public openrelay (network control)
  * Exit 0 if at least one TURN URL allocated, else 1.
  */
 'use strict';
@@ -82,29 +85,41 @@ function errCode(a) {
     return { code: a[0x0009][2] * 100 + a[0x0009][3], reason: a[0x0009].slice(4).toString('utf8') };
 }
 
-function sendUdp(host, port, msg) {
-    return new Promise((resolve) => {
-        const sock = dgram.createSocket('udp4');
-        const timer = setTimeout(() => { try { sock.close(); } catch {} resolve(null); }, TIMEOUT);
-        sock.on('message', (m) => { clearTimeout(timer); try { sock.close(); } catch {} resolve(m); });
-        sock.on('error', () => { clearTimeout(timer); try { sock.close(); } catch {} resolve(null); });
-        sock.send(msg, port, host, (e) => { if (e) { clearTimeout(timer); try { sock.close(); } catch {} resolve(null); } });
-    });
+// ---- persistent channels (same 5-tuple for challenge + auth) ----
+function udpChannel(host, port) {
+    const sock = dgram.createSocket('udp4');
+    let pending = null;
+    sock.on('message', (m) => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(m); } });
+    sock.on('error', () => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(null); } });
+    return {
+        ready: Promise.resolve(),
+        request(msg) {
+            return new Promise((res) => {
+                pending = { res, t: setTimeout(() => { pending = null; res(null); }, TIMEOUT) };
+                sock.send(msg, port, host, (e) => { if (e && pending) { clearTimeout(pending.t); pending = null; res(null); } });
+            });
+        },
+        close() { try { sock.close(); } catch {} }
+    };
 }
-function sendTcp(host, port, msg, useTls) {
-    return new Promise((resolve) => {
-        let buf = Buffer.alloc(0);
-        const done = (m) => { clearTimeout(timer); try { sock.destroy(); } catch {} resolve(m); };
-        const sock = useTls ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }) : net.connect({ host, port });
-        const timer = setTimeout(() => done(null), TIMEOUT);
-        sock.on('data', (d) => {
-            buf = Buffer.concat([buf, d]);
-            if (buf.length >= 20) { const len = buf.readUInt16BE(2); if (buf.length >= 20 + len) done(buf.slice(0, 20 + len)); }
-        });
-        sock.on('error', () => done(null));
-        sock.on('connect', () => { if (!useTls) sock.write(msg); });
-        sock.on('secureConnect', () => sock.write(msg));
+function tcpChannel(host, port, useTls) {
+    let buf = Buffer.alloc(0); let pending = null;
+    const sock = useTls ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }) : net.connect({ host, port });
+    const fail = () => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(null); } };
+    sock.on('data', (d) => {
+        buf = Buffer.concat([buf, d]);
+        if (pending && buf.length >= 20) {
+            const len = buf.readUInt16BE(2);
+            if (buf.length >= 20 + len) { const m = buf.slice(0, 20 + len); buf = buf.slice(20 + len); const p = pending; pending = null; clearTimeout(p.t); p.res(m); }
+        }
     });
+    sock.on('error', fail); sock.on('close', fail);
+    const ready = new Promise((res) => { sock.on(useTls ? 'secureConnect' : 'connect', res); sock.on('error', res); });
+    return {
+        ready,
+        request(msg) { return new Promise((res) => { pending = { res, t: setTimeout(() => { pending = null; res(null); }, TIMEOUT) }; sock.write(msg); }); },
+        close() { try { sock.destroy(); } catch {} }
+    };
 }
 
 async function allocateOnce(url, user, pass) {
@@ -115,31 +130,39 @@ async function allocateOnce(url, user, pass) {
     const port = parseInt(u.port || (isTls ? '5349' : '3478'), 10);
     const useTcp = isTls || transport === 'tcp';
     const mode = isTls ? 'TLS/TCP' : (useTcp ? 'TCP' : 'UDP');
-    const send = (m) => (useTcp ? sendTcp(host, port, m, isTls) : sendUdp(host, port, m));
 
     let ip = null;
     try { ip = (await dns.lookup(host, { family: 4 })).address; } catch (e) { return { ok: false, mode, ip: null, reason: 'DNS lookup failed: ' + e.code }; }
 
-    const txn = crypto.randomBytes(12);
-    let resp = await send(buildAllocate(txn));
-    if (!resp) return { ok: false, mode, ip, reason: 'no response to initial Allocate (' + mode + ' blocked, firewall, or wrong port)' };
-    let type = resp.readUInt16BE(0);
-    if (type === 0x0113) {
-        const a = parseAttrs(resp);
-        const realm = a[0x0014], nonce = a[0x0015];
-        if (!realm || !nonce) { const e = errCode(a); return { ok: false, mode, ip, reason: 'challenge without realm/nonce (code ' + e.code + ' ' + e.reason + ')' }; }
-        const txn2 = crypto.randomBytes(12);
-        resp = await send(buildAuthAllocate(txn2, user, realm, nonce, pass));
-        if (!resp) return { ok: false, mode, ip, reason: 'server reachable (got 401 challenge) but no response to authenticated Allocate' };
-        type = resp.readUInt16BE(0);
-    }
-    if (type === 0x0103) {
-        const a = parseAttrs(resp);
-        return { ok: true, mode, ip, relay: xorAddr(a[0x0016]) || '(relayed)', mapped: xorAddr(a[0x0020]) };
-    }
-    const a = parseAttrs(resp); const e = errCode(a);
-    if (type === 0x0113) return { ok: false, mode, ip, reason: 'AUTH REJECTED code ' + e.code + (e.reason ? ' "' + e.reason + '"' : '') + ' — username/credential wrong or expired' };
-    return { ok: false, mode, ip, reason: 'unexpected STUN type 0x' + type.toString(16) + ' code ' + e.code };
+    const ch = useTcp ? tcpChannel(host, port, isTls) : udpChannel(host, port);
+    await ch.ready;
+    try {
+        const txn = crypto.randomBytes(12);
+        let resp = await ch.request(buildAllocate(txn));
+        if (!resp) return { ok: false, mode, ip, reason: 'no response to initial Allocate (' + mode + ' blocked, firewall, or wrong port)' };
+        let type = resp.readUInt16BE(0);
+        if (type === 0x0113) {
+            const a = parseAttrs(resp);
+            const realm = a[0x0014], nonce = a[0x0015];
+            if (!realm || !nonce) { const e = errCode(a); return { ok: false, mode, ip, reason: 'challenge without realm/nonce (code ' + e.code + ' ' + e.reason + ')' }; }
+            // Same channel, fresh transaction; retry once if the first auth is dropped.
+            let authResp = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                authResp = await ch.request(buildAuthAllocate(crypto.randomBytes(12), user, realm, nonce, pass));
+                if (authResp) break;
+            }
+            resp = authResp;
+            if (!resp) return { ok: false, mode, ip, reason: 'server reachable (got 401 challenge) but no response to authenticated Allocate' };
+            type = resp.readUInt16BE(0);
+        }
+        if (type === 0x0103) {
+            const a = parseAttrs(resp);
+            return { ok: true, mode, ip, relay: xorAddr(a[0x0016]) || '(relayed)', mapped: xorAddr(a[0x0020]) };
+        }
+        const a = parseAttrs(resp); const e = errCode(a);
+        if (type === 0x0113) return { ok: false, mode, ip, reason: 'AUTH REJECTED code ' + e.code + (e.reason ? ' "' + e.reason + '"' : '') + ' — username/credential wrong or expired' };
+        return { ok: false, mode, ip, reason: 'unexpected STUN type 0x' + type.toString(16) + ' code ' + e.code };
+    } finally { ch.close(); }
 }
 
 function mintOpenrelay() {
