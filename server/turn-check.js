@@ -142,7 +142,17 @@ async function allocateOnce(url, user, pass) {
     return { ok: false, mode, ip, reason: 'unexpected STUN type 0x' + type.toString(16) + ' code ' + e.code };
 }
 
+function mintOpenrelay() {
+    const secret = 'openrelayprojectsecret';
+    const username = Math.floor(Date.now() / 1000) + 86400 + ':together';
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    return {
+        urls: ['turn:staticauth.openrelay.metered.ca:80', 'turn:staticauth.openrelay.metered.ca:443', 'turn:staticauth.openrelay.metered.ca:443?transport=tcp', 'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+        username, credential
+    };
+}
 function parseConfig() {
+    if (process.argv.includes('--openrelay')) return [mintOpenrelay()];
     if (process.argv.includes('--control')) {
         return [{ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }];
     }
@@ -153,7 +163,7 @@ function parseConfig() {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-(async () => {
+async function main() {
     let cfg;
     try { cfg = parseConfig(); } catch (e) { console.error('Cannot read TURN config: ' + e.message); process.exit(1); }
     let anyOk = false;
@@ -171,4 +181,6 @@ function parseConfig() {
     }
     console.log(anyOk ? '\nRESULT: TURN reachable and credentials VALID.' : '\nRESULT: no TURN allocation succeeded.');
     process.exit(anyOk ? 0 : 1);
-})();
+}
+if (require.main === module) main();
+module.exports = { allocateOnce, mintOpenrelay };

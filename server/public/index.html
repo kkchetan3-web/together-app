@@ -447,12 +447,11 @@ setBusy(true);
 // Fallback public STUN + TURN so calls still connect across different networks
 // (mobile data <-> Wi-Fi) even if turn.txt is missing/expired. TURN only relays
 // already-encrypted SRTP; it cannot read your media.
+// STUN-only baseline; TURN servers (your turn.txt + a quota-free public relay)
+// are injected by the server via /ice so credentials stay fresh and server-side.
 const FALLBACK_ICE=[
 {urls:'stun:stun.l.google.com:19302'},
-{urls:'stun:stun1.l.google.com:19302'},
-{urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
-{urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
-{urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
+{urls:'stun:stun1.l.google.com:19302'}
 ];
 const ICE={iceServers:FALLBACK_ICE.slice(),iceCandidatePoolSize:2};
 fetch('/ice').then(r=>r.json()).then(list=>{

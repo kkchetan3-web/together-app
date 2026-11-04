@@ -46,14 +46,31 @@ app.get('/link', (req, res) => {
     catch { res.type('text').send(''); }
 });
 
+// Quota-free public relay: Metered Open Relay "static auth" (REST secret).
+// The secret is published by Metered for the Open Relay Project; credentials
+// minted from it do NOT consume a personal Metered plan quota. Time-limited.
+function openrelayRest() {
+    const secret = 'openrelayprojectsecret';
+    const username = Math.floor(Date.now() / 1000) + 86400 + ':together';
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    return {
+        urls: [
+            'turn:staticauth.openrelay.metered.ca:80',
+            'turn:staticauth.openrelay.metered.ca:443',
+            'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+            'turns:staticauth.openrelay.metered.ca:443?transport=tcp'
+        ],
+        username, credential
+    };
+}
+
 app.get('/ice', (req, res) => {
-    const fallback = [{ urls: 'stun:stun.l.google.com:19302' }];
+    const clean = [];
     try {
         const data = fs.readFileSync(path.join(ROOT, 'turn.txt'), 'utf8').trim();
         if (data) {
             const parsed = JSON.parse(data);
             if (Array.isArray(parsed)) {
-                const clean = [];
                 for (const e of parsed) {
                     if (!e || !e.urls) continue;
                     const entry = {
@@ -67,11 +84,11 @@ app.get('/ice', (req, res) => {
                     if (ph) continue; // skip redacted / example placeholders
                     clean.push(entry);
                 }
-                if (clean.length) return res.json(clean);
             }
         }
     } catch {}
-    res.json(fallback);
+    // User TURN first (if quota remains), then the quota-free public relay, then STUN.
+    res.json(clean.concat([openrelayRest(), { urls: 'stun:stun.l.google.com:19302' }]));
 });
 
 const upload = multer({ dest: uploadsDir, limits: { fileSize: 20 * 1024 ** 3 } });
