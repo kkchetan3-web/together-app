@@ -70,15 +70,19 @@ function buildAuthAllocate(txn, user, realm, nonce, pass) {
         attr(0x0015, nonce),
         attr(0x0019, rt)
     ]);
-    const miLen = body.length + 4 + 20;
-    const msg = Buffer.concat([header(0x0003, miLen, txn), body, attr(0x0008, Buffer.alloc(20))]);
+    // RFC 5389 15.4: HMAC input = header + preceding attrs (NOT the MI attr header),
+    // with the header length field pointing to the END of the MI attribute.
+    const miLen = body.length + 24;
+    const msgForMI = Buffer.concat([header(0x0003, miLen, txn), body]);
     const key = crypto.createHash('md5').update(user + ':' + realm.toString('utf8') + ':' + pass).digest();
-    const hmac = crypto.createHmac('sha1', key).update(msg.slice(0, msg.length - 20)).digest();
-    hmac.copy(msg, msg.length - 20);
-    msg.writeUInt16BE(miLen + 8, 2);
-    const withFp = Buffer.concat([msg, attr(0x8028, Buffer.alloc(4))]);
-    withFp.writeUInt32BE((crc32(withFp.slice(0, withFp.length - 4)) ^ 0x5354554e) >>> 0, withFp.length - 4);
-    return withFp;
+    const hmac = crypto.createHmac('sha1', key).update(msgForMI).digest();
+    const msgWithMI = Buffer.concat([msgForMI, attr(0x0008, hmac)]);
+    // RFC 5389 15.5: CRC input = everything up to (NOT including) the FINGERPRINT
+    // attribute, with the header length field including the FINGERPRINT attribute.
+    msgWithMI.writeUInt16BE(miLen + 8, 2);
+    const fp = (crc32(msgWithMI) ^ 0x5354554e) >>> 0;
+    const fpVal = Buffer.alloc(4); fpVal.writeUInt32BE(fp, 0);
+    return Buffer.concat([msgWithMI, attr(0x8028, fpVal)]);
 }
 function errCode(a) {
     if (!a[0x0009] || a[0x0009].length < 4) return { code: 0, reason: '' };
