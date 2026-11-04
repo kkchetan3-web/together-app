@@ -7,7 +7,7 @@
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
-(function(){try{var q=new URLSearchParams(location.search).get('theme');var ok=function(v){return v==='dark'||v==='light'||v==='system'||v==='cute';};var p=ok(q)?q:(localStorage.getItem('together-theme')||'cute');var t=p==='cute'?'cute':((p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches))?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','cute');}})();
+(function(){try{var p=localStorage.getItem('together-theme')||'dark';var dark=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',dark?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();
 </script>
 <style>
 :root{
@@ -329,9 +329,8 @@ const $=(id)=>document.getElementById(id);
 // THEME: dark / light / system, persisted per device; "system" follows the OS live.
 const THEME_KEY='together-theme';
 const themeMQ=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
-const urlTheme=(()=>{const t=new URLSearchParams(location.search).get('theme');return (t==='dark'||t==='light'||t==='system'||t==='cute')?t:null;})();
-let themePref=urlTheme||'cute';
-if(!urlTheme){try{const s=localStorage.getItem(THEME_KEY);if(s==='dark'||s==='light'||s==='system'||s==='cute')themePref=s;}catch(_){}}
+let themePref='cute';
+try{const s=localStorage.getItem(THEME_KEY);if(s==='dark'||s==='light'||s==='system'||s==='cute')themePref=s;}catch(_){}
 function systemDark(){
 // In the Android app, prefer the native night-mode bridge; elsewhere use the OS media query.
 if(window.AndroidTheme&&typeof window.AndroidTheme.isNightMode==='function'){try{return !!window.AndroidTheme.isNightMode();}catch(_){}}
