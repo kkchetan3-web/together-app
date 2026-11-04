@@ -60,6 +60,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #views{flex:1;display:flex;min-height:0;position:relative}
 #views video{width:100%;height:100%;object-fit:contain;background:#0b0817}
 #screen{display:none}
+#ytWrap{position:absolute;inset:0;display:none;background:#000}
+#ytPlayer,#ytWrap iframe{width:100%;height:100%;border:0;display:block}
+#ytUnlock{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;font-size:18px;font-weight:700;cursor:pointer;z-index:5;text-align:center;padding:12px}
 
 /* CONTROL BAR */
 #bar{display:flex;align-items:center;gap:6px;padding:10px 12px;background:rgba(24,18,46,0.88);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border-top:1px solid var(--border);flex-wrap:wrap;flex-shrink:0;position:relative}
@@ -215,6 +218,7 @@ html[data-theme="light"] .call-status.warn{color:#B26A00}
 <div id="views">
 <video id="player" controls controlsList="nodownload" playsinline></video>
 <video id="screen" autoplay playsinline controls></video>
+<div id="ytWrap"><div id="ytPlayer"></div><div id="ytUnlock">▶ Tap to play together</div></div>
 </div>
 
 <div id="bar">
@@ -224,7 +228,7 @@ html[data-theme="light"] .call-status.warn{color:#B26A00}
 <button id="upBtn" disabled>⬆ Upload</button>
 <button id="delBtn">🗑 Delete</button>
 <span id="upStatus"></span>
-<input type="text" id="urlIn" placeholder="Video URL (.mp4)">
+<input type="text" id="urlIn" placeholder="Video URL (.mp4 / .m3u8 / YouTube)">
 <button id="loadUrl">Load</button>
 <button id="mic">🎤 Mic</button>
 <button id="cam">📷 Cam</button>
@@ -350,6 +354,9 @@ let localStream=null,screenStream=null,screenSenders=[];
 let remoteScreenId=null,makingOffer=false,ignoreOffer=false;
 let remote=false,hls=null,resumeAfter=false;
 let playlist=[],currentIdx=-1;
+// YouTube synced playback state
+let yt=null,ytReady=false,ytMode=false,ytApiLoading=false;
+const ytApiCallbacks=[];
 let callSpeakerOn=true;
 let uploadInProgress=false;
 let joining=false;
@@ -513,9 +520,14 @@ el.onclick=()=>playIdx(Number(el.dataset.idx));
 function playIdx(idx){
 if(idx<0||idx>=playlist.length)return;
 const it=playlist[idx];
+if(it.kind==='youtube'&&it.videoId){
+showYouTube(it.videoId,0,true);
+socket.emit('player',{type:'load',kind:'youtube',videoId:it.videoId,url:it.url,time:0});
+}else{
 loadSource(it.url);addSubs(it.subs);
-currentIdx=idx;
 socket.emit('player',{type:'load',url:it.url,subs:it.subs});
+}
+currentIdx=idx;
 socket.emit('queue',{action:'current',idx});
 renderQueue();
 sys('Playing: '+it.name);
@@ -633,10 +645,88 @@ prompt('Copied! Send this link to your partner:',link);
 };
 
 function loadSource(url){
+stopYouTube();
+video.style.display='block';
 if(hls){hls.destroy();hls=null}
 if(url.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
 hls=new Hls();hls.loadSource(url);hls.attachMedia(video);
 }else video.src=url;
+}
+
+// ---- YouTube synced playback ----
+function parseYouTube(u){
+try{
+const url=new URL(u);
+const h=url.hostname.replace(/^www\./,'');
+let id=null;
+if(h==='youtu.be')id=url.pathname.slice(1).split('/')[0];
+else if(h==='youtube.com'||h==='m.youtube.com'||h==='music.youtube.com'){
+if(url.pathname==='/watch')id=url.searchParams.get('v');
+else{const m=url.pathname.match(/^\/(embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/);if(m)id=m[2];}
+}
+return (id&&/^[A-Za-z0-9_-]{11}$/.test(id))?id:null;
+}catch(_){return null}
+}
+function loadYouTubeApi(cb){
+if(window.YT&&YT.Player)return cb();
+ytApiCallbacks.push(cb);
+if(ytApiLoading)return;
+ytApiLoading=true;
+window.onYouTubeIframeAPIReady=()=>{ytApiCallbacks.splice(0).forEach(f=>f());};
+const s=document.createElement('script');
+s.src='https://www.youtube.com/iframe_api';
+s.onerror=()=>sys('Could not load the YouTube player (check internet).');
+document.head.appendChild(s);
+}
+function ytTime(){return (yt&&ytReady&&yt.getCurrentTime)?yt.getCurrentTime():0}
+function ytPaused(){return !(yt&&ytReady&&yt.getPlayerState&&window.YT&&yt.getPlayerState()===YT.PlayerState.PLAYING)}
+function mediaTime(){return ytMode?ytTime():video.currentTime}
+function mediaPlaying(){return ytMode?!ytPaused():!video.paused}
+const sendYt=(type)=>{if(!remote&&ytMode)socket.emit('player',{type,time:ytTime()})};
+function ytPlay(){
+if(!yt)return;
+try{yt.playVideo()}catch(_){}
+setTimeout(()=>{if(ytMode&&yt&&yt.getPlayerState&&window.YT&&yt.getPlayerState()!==YT.PlayerState.PLAYING)$('ytUnlock').style.display='flex';},1200);
+}
+function onYtState(ev){
+const S=window.YT&&YT.PlayerState;if(!S)return;
+if(ev.data===S.PLAYING){$('ytUnlock').style.display='none';sendYt('play');sendYt('ready');}
+else if(ev.data===S.PAUSED)sendYt('pause');
+else if(ev.data===S.BUFFERING)sendYt('buffering');
+}
+function stopYouTube(){
+ytMode=false;ytReady=false;
+if(yt){try{yt.destroy()}catch(_){}yt=null;}
+$('ytPlayer').innerHTML='';
+$('ytWrap').style.display='none';
+$('ytUnlock').style.display='none';
+}
+function showYouTube(videoId,startTime,autoplay){
+stopYouTube();
+ytMode=true;
+$('ytWrap').style.display='block';
+video.style.display='none';
+try{video.pause()}catch(_){}
+if(hls){hls.destroy();hls=null}
+loadYouTubeApi(()=>{
+const mount=document.createElement('div');mount.id='ytMount';
+$('ytPlayer').innerHTML='';$('ytPlayer').appendChild(mount);
+yt=new YT.Player('ytMount',{
+videoId,
+playerVars:{playsinline:1,rel:0,controls:1,autoplay:autoplay?1:0,start:Math.max(0,Math.floor(startTime||0))},
+events:{
+onReady:(e)=>{ytReady=true;if(startTime>1)e.target.seekTo(startTime,true);if(autoplay)ytPlay();},
+onStateChange:onYtState,
+onError:()=>sys('YouTube playback error (video may be restricted or unavailable).')
+}
+});
+});
+}
+$('ytUnlock').onclick=()=>{if(yt){try{yt.unMute();yt.playVideo()}catch(_){}}$('ytUnlock').style.display='none';};
+function pushPlaylist(item){
+const i=playlist.findIndex(p=>p.url===item.url);
+if(i>=0)currentIdx=i;else{playlist.push(item);currentIdx=playlist.length-1;}
+renderQueue();
 }
 function addSubs(url){
 video.querySelectorAll('track').forEach(t=>t.remove());
@@ -648,20 +738,34 @@ video.appendChild(t);
 $('loadUrl').onclick=()=>{
 const url=$('urlIn').value.trim();
 if(!url)return;
+const yid=parseYouTube(url);
+if(yid){
+showYouTube(yid,0,true);
+pushPlaylist({url,kind:'youtube',videoId:yid,name:'YouTube • '+yid});
+socket.emit('player',{type:'load',kind:'youtube',videoId:yid,url,time:0});
+sys('You loaded a YouTube video — partner will play it too');
+return;
+}
 loadSource(url);addSubs(null);
 socket.emit('player',{type:'load',url,subs:null});
 sys('You loaded a video');
 };
-const send=(type)=>{if(!remote)socket.emit('player',{type,time:video.currentTime})};
+const send=(type)=>{if(!remote&&!ytMode)socket.emit('player',{type,time:video.currentTime})};
 video.addEventListener('play',()=>send('play'));
 video.addEventListener('pause',()=>send('pause'));
 video.addEventListener('seeked',()=>send('seek'));
 video.addEventListener('waiting',()=>{if(!remote)socket.emit('player',{type:'buffering'})});
 video.addEventListener('playing',()=>{if(!remote)socket.emit('player',{type:'ready'})});
-$('syncBtn').onclick=()=>{socket.emit('player',{type:'seek',time:video.currentTime});sys('Synced partner to your position')};
+$('syncBtn').onclick=()=>{socket.emit('player',{type:'seek',time:mediaTime()});sys('Synced partner to your position')};
 
-socket.on('player',({type,time,url,subs})=>{
+socket.on('player',({type,time,url,subs,kind,videoId})=>{
 if(type==='load'){
+if(kind==='youtube'&&videoId){
+showYouTube(videoId,time||0,false);
+pushPlaylist({url:url||('https://youtu.be/'+videoId),kind:'youtube',videoId,name:'YouTube • '+videoId});
+sys('Partner loaded a YouTube video');
+return;
+}
 const wasUpload=uploadInProgress;
 const capturedName=($('fileName')&&$('fileName').textContent)||'';
 loadSource(url);addSubs(subs);sys('A video was loaded');
@@ -678,14 +782,24 @@ if(idx>=0){currentIdx=idx;if(wasUpload)socket.emit('queue',{action:'current',idx
 renderQueue();
 return;
 }
-if(type==='delete'){if(hls){hls.destroy();hls=null}video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();sys('The video was deleted.');return}
+if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();sys('The video was deleted.');return}
 remote=true;
+if(ytMode&&yt){
+if(type==='buffering'){resumeAfter=!ytPaused();yt.pauseVideo()}
+else if(type==='ready'){if(resumeAfter){yt.playVideo();resumeAfter=false}}
+else{
+if(time!=null&&Math.abs(ytTime()-time)>(type==='sync'?1.5:0.4))yt.seekTo(time,true);
+if(type==='play')ytPlay();
+if(type==='pause')yt.pauseVideo();
+}
+}else{
 if(type==='buffering'){resumeAfter=!video.paused;video.pause()}
 else if(type==='ready'){if(resumeAfter){video.play().catch(()=>{});resumeAfter=false}}
 else{
 if(time!=null&&Math.abs(video.currentTime-time)>(type==='sync'?1.5:0.4))video.currentTime=time;
 if(type==='play')video.play().catch(()=>sys('Tap the video once to allow playback'));
 if(type==='pause')video.pause();
+}
 }
 setTimeout(()=>(remote=false),700);
 });
@@ -696,7 +810,7 @@ else if(msg.action==='current'){currentIdx=msg.idx;renderQueue()}
 });
 
 setInterval(()=>{
-if(pc&&!polite&&!video.paused)socket.emit('player',{type:'sync',time:video.currentTime});
+if(pc&&!polite&&mediaPlaying())socket.emit('player',{type:'sync',time:mediaTime()});
 },5000);
 
 function fmtSize(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB'}
@@ -805,6 +919,7 @@ if(stream&&stream.id===remoteScreenId){
 $('screen').srcObject=stream;
 $('screen').style.display='block';
 video.style.display='none';
+$('ytWrap').style.display='none';
 }else{
 $('them').srcObject=stream||new MediaStream([e.track]);
 try{routeStreamToSpeaker($('them').srcObject)}catch(e){}
@@ -865,7 +980,8 @@ socket.on('screen-stop',()=>{remoteScreenId=null;hideScreen();sys('Screen share 
 function hideScreen(){
 $('screen').srcObject=null;
 $('screen').style.display='none';
-video.style.display='block';
+video.style.display=ytMode?'none':'block';
+$('ytWrap').style.display=ytMode?'block':'none';
 }
 function floatEmoji(e){
 const d=document.createElement('div');
