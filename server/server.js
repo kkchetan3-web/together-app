@@ -30,7 +30,8 @@ app.get('/health', (req, res) => {
         version: VERSION,
         rooms: rooms.size,
         uptime: Math.round(process.uptime()),
-        turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt'))
+        turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
+        maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3)
     });
 });
 
@@ -91,7 +92,9 @@ app.get('/ice', (req, res) => {
     res.json(clean.concat([openrelayRest(), { urls: 'stun:stun.l.google.com:19302' }]));
 });
 
-const upload = multer({ dest: uploadsDir, limits: { fileSize: 20 * 1024 ** 3 } });
+// Maximum room video upload. Override with MAX_UPLOAD_GB env if ever needed.
+const MAX_UPLOAD_BYTES = Math.max(1, Math.round((Number(process.env.MAX_UPLOAD_GB) || 5) * 1024 ** 3));
+const upload = multer({ dest: uploadsDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
 const chatImgUpload = multer({ dest: uploadsDir, limits: { fileSize: 5 * 1024 ** 2 } });
 const rooms = new Map();
 const roomState = new Map();
@@ -108,7 +111,17 @@ function normalizeCid(value) {
     return /^[A-Za-z0-9_-]{8,64}$/.test(cid) ? cid : null;
 }
 
-app.post('/upload/:room', upload.single('video'), (req, res) => {
+app.post('/upload/:room', (req, res, next) => {
+    upload.single('video')(req, res, (err) => {
+        if (err) {
+            const tooBig = err.code === 'LIMIT_FILE_SIZE';
+            return res.status(tooBig ? 413 : 400).json({
+                error: tooBig ? 'File too large (max ' + Math.round(MAX_UPLOAD_BYTES / 1024 ** 3) + ' GB).' : 'Upload failed: ' + err.message
+            });
+        }
+        next();
+    });
+}, (req, res) => {
     const room = normalizeRoom(req.params.room);
     if (!room || !rooms.has(room)) {
         if (req.file) fs.unlink(req.file.path, () => {});

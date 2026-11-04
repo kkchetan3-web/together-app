@@ -966,10 +966,14 @@ $('fileName').textContent=f.name+' ('+fmtSize(f.size)+')';
 $('upBtn').disabled=false;
 $('upStatus').textContent='Ready to upload';
 };
+const MAX_UPLOAD_GB=5;
+const isLocalHost=/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 $('upBtn').onclick=()=>{
 if(!room)return;
 const f=$('upFile').files[0];
 if(!f)return alert('Choose a file first');
+if(f.size>MAX_UPLOAD_GB*1024**3)return toast('File too large (max '+MAX_UPLOAD_GB+' GB).','warn');
+if(!isLocalHost&&f.size>90*1024**2)toast('Public tunnel caps uploads near 100 MB. For big files, upload on the host device via localhost.','warn');
 uploadInProgress=true;
 $('upBtn').disabled=true;
 $('pickBtn').disabled=true;
@@ -987,7 +991,14 @@ $('upStatus').textContent='Uploading '+pct+'%';
 };
 xhr.onload=()=>{
 if(xhr.status===200){$('upStatus').textContent='Converting on server...'}
-else{uploadInProgress=false;$('upStatus').textContent='Upload rejected';$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false}
+else{
+uploadInProgress=false;
+let msg='Upload rejected';
+try{const j=JSON.parse(xhr.responseText);if(j&&j.error)msg=j.error;}catch(_){}
+if(xhr.status===413)msg='File too large (max '+MAX_UPLOAD_GB+' GB).';
+$('upStatus').textContent=msg;toast(msg,'error');
+$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;
+}
 };
 xhr.onerror=()=>{
 uploadInProgress=false;
