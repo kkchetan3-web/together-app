@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.content.res.Configuration;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
@@ -166,6 +167,7 @@ public class MainActivity extends Activity {
 
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         web.addJavascriptInterface(new SpeakerBridge(), "AndroidSpeaker");
+        web.addJavascriptInterface(new ThemeBridge(), "AndroidTheme");
 
         web.loadUrl(LAUNCHER);
     }
@@ -290,6 +292,15 @@ public class MainActivity extends Activity {
                 audioManager.setSpeakerphoneOn(speaker);
             }
         } catch (Exception e) { }
+    }
+
+    public class ThemeBridge {
+        // Lets the website's "System" theme follow Android's actual night mode.
+        @JavascriptInterface
+        public boolean isNightMode() {
+            int mask = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+            return mask == Configuration.UI_MODE_NIGHT_YES;
+        }
     }
 
     public class SpeakerBridge {
