@@ -19,6 +19,8 @@ const io = new Server(server);
 const uploadsDir = path.join(ROOT, 'uploads');
 const mediaDir = path.join(ROOT, 'media');
 const chatImgDir = path.join(mediaDir, 'chat');
+const couplePath = path.join(ROOT, 'couple.json');
+const jarPath = path.join(ROOT, 'jar.json');
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(mediaDir, { recursive: true });
 fs.mkdirSync(chatImgDir, { recursive: true });
@@ -40,6 +42,50 @@ app.get('/vendor/hls.min.js', (req, res) => {
 
 app.use(express.static(path.join(ROOT, 'public')));
 app.use('/media', express.static(mediaDir));
+
+// ---- Anniversary "Our Space" couple config (feature 1 & 10), persisted ----
+function readJson(p, fallback) {
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
+}
+function writeJson(p, v) { fs.writeFileSync(p, JSON.stringify(v, null, 2)); }
+app.get('/couple', (req, res) => res.json(readJson(couplePath, {})));
+app.post('/couple', express.json({ limit: '1mb' }), (req, res) => {
+    const b = req.body || {};
+    const str = (v, n) => String(v == null ? '' : v).slice(0, n);
+    const cfg = {
+        herName: str(b.herName, 24),
+        myName: str(b.myName, 24),
+        startDate: str(b.startDate, 10),
+        anniversaryDate: str(b.anniversaryDate, 10),
+        color: /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : '',
+        mascot: str(b.mascot, 8),
+        secret: str(b.secret, 300),
+        coupleRoom: normalizeRoom(b.coupleRoom) || '',
+        photo: str(b.photo, 2048)
+    };
+    writeJson(couplePath, cfg);
+    io.emit('couple', cfg);
+    res.json({ ok: true, cfg });
+});
+
+// ---- Shared date-night jar (feature 7), persisted ----
+app.get('/jar', (req, res) => res.json({ list: readJson(jarPath, []) }));
+app.post('/jar', express.json({ limit: '64kb' }), (req, res) => {
+    const text = String((req.body && req.body.text) || '').trim().slice(0, 140);
+    if (!text) return res.status(400).json({ error: 'Empty note' });
+    const list = readJson(jarPath, []);
+    if (list.length >= 200) list.shift();
+    list.push({ id: crypto.randomBytes(6).toString('hex'), text });
+    writeJson(jarPath, list);
+    io.emit('jar', { list });
+    res.json({ ok: true, list });
+});
+app.delete('/jar/:id', (req, res) => {
+    const list = readJson(jarPath, []).filter((n) => n.id !== req.params.id);
+    writeJson(jarPath, list);
+    io.emit('jar', { list });
+    res.json({ ok: true, list });
+});
 
 app.get('/link', (req, res) => {
     try { res.type('text').send(fs.readFileSync(path.join(ROOT, 'link.txt'), 'utf8').trim()); }

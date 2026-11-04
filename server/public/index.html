@@ -187,6 +187,43 @@ html[data-theme="light"] .lobby-status.error{color:#D63A5C}
 html[data-theme="light"] .call-status.ok{color:#1E9E5A}
 html[data-theme="light"] .call-status.warn{color:#B26A00}
 
+/* ---- Anniversary home + Our Space + jar (features 1,7,10) ---- */
+#home{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:18px;overflow-y:auto;background:var(--bg);background-image:radial-gradient(circle at 15% 15%,rgba(167,139,250,0.25),transparent 45%),radial-gradient(circle at 85% 85%,rgba(124,106,239,0.2),transparent 45%)}
+.homeCard{width:100%;max-width:420px;text-align:center;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:30px 26px;display:flex;flex-direction:column;gap:14px}
+.homeMascot{font-size:56px;line-height:1;cursor:pointer;user-select:none;filter:drop-shadow(0 6px 16px rgba(167,139,250,.4));animation:bob 3s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+#homeTitle{font-size:32px;font-weight:800;letter-spacing:-.5px;background:linear-gradient(135deg,#fff 20%,var(--accent-2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+html[data-theme="light"] #homeTitle{background:linear-gradient(135deg,#3A2E63 20%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.homeNames{color:var(--accent-2);font-weight:700;font-size:15px}
+.homePhoto{width:96px;height:96px;object-fit:cover;border-radius:50%;margin:0 auto;border:3px solid var(--accent);box-shadow:var(--shadow-soft)}
+.homeCounters{display:flex;gap:10px;justify-content:center}
+.counter{flex:1;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+.counter b{font-size:22px;color:var(--accent-2);font-variant-numeric:tabular-nums}
+.counter span{font-size:11px;color:var(--text-muted)}
+.loveNote{font-style:italic;color:var(--text-muted);font-size:13px;min-height:34px}
+.homeEnter{background:var(--grad);border:none;color:#fff;font-weight:800;font-size:16px;padding:14px;box-shadow:0 8px 22px rgba(108,92,231,.4)}
+.homeRow{display:flex;gap:8px}
+.homeRow button{flex:1}
+.linkish{background:transparent;border:none;color:var(--text-muted);font-size:12px;text-decoration:underline;padding:4px}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:340px;max-width:94vw;max-height:88dvh;overflow-y:auto;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:16px;z-index:100005;display:flex;flex-direction:column;gap:10px}
+.modal[hidden]{display:none}
+.cpCol{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.cpCol textarea{width:100%;resize:vertical;font-family:inherit}
+#wheelWrap{position:relative;width:150px;height:150px;margin:4px auto}
+#wheel{width:100%;height:100%;border-radius:50%;border:4px solid var(--border);background:conic-gradient(#F79BB4,#FFD9A0,#9FE0C9,#A78BFA,#8EC5FF,#F79BB4);transition:transform 3.2s cubic-bezier(.17,.67,.12,.99);box-shadow:var(--shadow-soft)}
+#wheelPointer{position:absolute;top:-10px;left:50%;transform:translateX(-50%);color:var(--accent-2);font-size:18px}
+#wheelResult{text-align:center;font-weight:700;color:var(--accent-2);min-height:22px;font-size:14px}
+#jarList{display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto}
+#jarList .jitem{display:flex;align-items:center;gap:6px;font-size:12px;background:var(--glass);border:1px solid var(--border);border-radius:10px;padding:5px 8px}
+#jarList .jitem span{flex:1}
+#jarList .jdel{padding:0 6px;background:transparent;border:none;color:var(--text-muted)}
+#jarDrawn{margin-top:6px;text-align:center;font-weight:700;color:var(--accent-2);font-size:15px}
+#secretPanel{position:fixed;inset:0;z-index:100006;display:flex;align-items:center;justify-content:center;background:rgba(11,8,23,.8);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#secretPanel[hidden]{display:none}
+.secretCard{max-width:340px;width:92vw;text-align:center;background:var(--glass-strong);border:1px solid var(--accent);border-radius:var(--radius-lg);padding:26px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+#secretMascot{font-size:48px}
+#secretText{font-size:15px;line-height:1.5;color:var(--text);white-space:pre-wrap}
+
 /* ---- UX batch (features 3,4,6,8,11,16) ---- */
 #toasts{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:100001;pointer-events:none;width:max-content;max-width:92vw}
 .toast{padding:8px 14px;border-radius:999px;background:var(--glass-strong);border:1px solid var(--border);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);color:var(--text);font-size:13px;font-weight:600;box-shadow:var(--shadow-soft);animation:toastIn .25s ease;text-align:center}
@@ -270,6 +307,27 @@ body{--tscale:1}
 </style>
 </head>
 <body>
+
+<!-- Anniversary "Our Room" home (feature 1) -->
+<div id="home">
+<div class="homeCard">
+<div id="homeMascot" class="homeMascot" title="psst… tap me">🐰</div>
+<h1 id="homeTitle">Together</h1>
+<div id="homeNames" class="homeNames">You ♥ Partner</div>
+<img id="homePhoto" class="homePhoto" alt="us" hidden>
+<div class="homeCounters">
+<div class="counter"><b id="daysTogether">–</b><span>days together</span></div>
+<div class="counter"><b id="annivCountdown">–</b><span>until anniversary</span></div>
+</div>
+<div id="loveNote" class="loveNote"></div>
+<button id="enterOurs" class="homeEnter">💞 Enter our room</button>
+<div class="homeRow">
+<button id="jarBtn">🫙 Date-night jar</button>
+<button id="spaceBtn">💞 Our Space</button>
+</div>
+<button id="useCodes" class="linkish">use room codes instead</button>
+</div>
+</div>
 
 <div id="lobby">
 <h1>🎬 Together</h1>
@@ -387,6 +445,38 @@ body{--tscale:1}
 <div class="cpHint">Focus outlines are always on. Landscape phones get a compact layout automatically.</div>
 </div>
 <input type="file" id="imgFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+
+<!-- Our Space settings (features 1 & 10) -->
+<div id="spacePanel" class="modal" hidden role="dialog" aria-label="Our Space settings">
+<div class="cpHead"><b>💞 Our Space</b><button id="spaceClose" title="Close">✕</button></div>
+<label class="cpRow">Her name <input id="cfgHer" maxlength="24"></label>
+<label class="cpRow">Your name <input id="cfgMy" maxlength="24"></label>
+<label class="cpRow">Together since <input id="cfgStart" type="date"></label>
+<label class="cpRow">Anniversary <input id="cfgAnniv" type="date"></label>
+<label class="cpRow">Her color <input id="cfgColor" type="color" value="#A78BFA"></label>
+<label class="cpRow">Mascot <input id="cfgMascot" maxlength="8" placeholder="🐰"></label>
+<label class="cpRow">Photo URL <input id="cfgPhoto" placeholder="https://…"></label>
+<label class="cpRow">Our room code <input id="cfgRoom" maxlength="12" placeholder="OURROOM"></label>
+<label class="cpCol">Secret note (easter egg)<textarea id="cfgSecret" maxlength="300" rows="3"></textarea></label>
+<button id="cfgSave">Save our space</button>
+<div class="cpHint">Tip: on the home screen, tap the mascot 7 times to reveal the secret note.</div>
+</div>
+
+<!-- Date-night jar + wheel (feature 7) -->
+<div id="jarPanel" class="modal" hidden role="dialog" aria-label="Date-night jar">
+<div class="cpHead"><b>🫙 Date-night jar</b><button id="jarClose" title="Close">✕</button></div>
+<div id="wheelWrap"><div id="wheel"></div><div id="wheelPointer">▼</div></div>
+<div id="wheelResult"></div>
+<button id="spinBtn">🎡 Spin for a date idea</button>
+<div class="cpHint">…or draw one of the notes you've both put in the jar:</div>
+<div id="jarList"></div>
+<div class="cpRow"><input id="jarInput" maxlength="140" placeholder="Add a date idea / note…"><button id="jarAdd">Add</button></div>
+<button id="jarDraw">🫳 Draw a note</button>
+<div id="jarDrawn"></div>
+</div>
+
+<!-- Secret easter egg (feature 10) -->
+<div id="secretPanel" hidden><div class="secretCard"><div id="secretMascot">💌</div><div id="secretText"></div><button id="secretClose">Close</button></div></div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/vendor/hls.min.js"></script>
@@ -666,6 +756,7 @@ try{
 const res=await joinRoom(code,create);
 room=code;
 $('lobby').style.display='none';
+$('home').style.display='none';
 $('app').style.display='grid';
 if(window.AndroidSpeaker)window.AndroidSpeaker.setSpeakerOn(true);
 forceSpeakerRoute();
@@ -1214,6 +1305,119 @@ const dx=e.changedTouches[0].clientX-swipeX,dy=e.changedTouches[0].clientY-swipe
 swipeX=null;
 if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy)*1.5){setChatHidden(dx<0);}
 },{passive:true});
+
+// ---- Anniversary: Our Room home (1), date-night jar (7), her aesthetic (10) ----
+const LOVE_NOTES=[
+'Every day with you is my favorite day.',
+'I still get butterflies when I see your name.',
+'You are my today and all of my tomorrows.',
+'Home is wherever I am with you.',
+'I love you more than yesterday, less than tomorrow.',
+'You make ordinary moments feel magical.',
+'My heart is, and always will be, yours.',
+'Thank you for being my person.',
+'One year down, forever to go.',
+'You are the best thing I never planned.'
+];
+let couple={herName:'',myName:'',startDate:'',anniversaryDate:'',color:'',mascot:'',secret:'',coupleRoom:'',photo:''};
+function shade(hex,amt){
+const n=parseInt(hex.slice(1),16);
+const c=(v)=>Math.max(0,Math.min(255,v+amt));
+const r=c(n>>16),g=c((n>>8)&255),b=c(n&255);
+return '#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
+}
+function applyCouple(cfg){
+if(!cfg||typeof cfg!=='object'||Array.isArray(cfg))cfg={};
+Object.assign(couple,cfg);
+const her=couple.herName||'My love',my=couple.myName||'Me';
+document.title='♥ '+her+' — Together';
+$('homeTitle').textContent='♥ '+her;
+$('homeNames').textContent=my+' ♥ '+her;
+$('homeMascot').textContent=couple.mascot||'🐰';
+if(couple.photo){$('homePhoto').src=couple.photo;$('homePhoto').hidden=false;}else $('homePhoto').hidden=true;
+if(couple.color){
+const rs=document.documentElement.style,c=couple.color;
+rs.setProperty('--accent',c);rs.setProperty('--accent-2',shade(c,30));rs.setProperty('--brand',c);
+rs.setProperty('--grad','linear-gradient(135deg,'+shade(c,40)+' 0%,'+c+' 55%,'+shade(c,-30)+' 100%)');
+}
+if(couple.myName&&!$('name').value)$('name').value=couple.myName;
+updateCounters();
+const now=new Date();const doy=Math.floor((now-new Date(now.getFullYear(),0,0))/864e5);
+$('loveNote').textContent='“'+LOVE_NOTES[doy%LOVE_NOTES.length]+'”';
+}
+function updateCounters(){
+const now=Date.now();
+if(couple.startDate){const s=new Date(couple.startDate+'T00:00:00');if(!isNaN(s))$('daysTogether').textContent=Math.max(0,Math.floor((now-s.getTime())/864e5));}
+const anniv=couple.anniversaryDate||couple.startDate;
+if(anniv){const d=new Date(anniv+'T00:00:00');if(!isNaN(d)){
+const next=new Date(now);next.setHours(0,0,0,0);next.setMonth(d.getMonth(),d.getDate());
+if(next.getTime()<now)next.setFullYear(next.getFullYear()+1);
+const diff=next.getTime()-now;
+$('annivCountdown').textContent=Math.floor(diff/864e5)+'d '+Math.floor(diff%864e5/36e5)+'h '+Math.floor(diff%36e5/6e4)+'m';
+}}
+}
+setInterval(updateCounters,30000);
+fetch('/couple').then(r=>r.json()).then(applyCouple).catch(()=>applyCouple({}));
+socket.on('couple',applyCouple);
+// home navigation
+$('home').style.display='flex';
+$('lobby').style.display='none';
+$('enterOurs').onclick=()=>enter(couple.coupleRoom||'OURROOM',true);
+$('useCodes').onclick=()=>{$('home').style.display='none';$('lobby').style.display='grid';};
+// Our Space settings
+$('spaceBtn').onclick=()=>{
+$('cfgHer').value=couple.herName||'';$('cfgMy').value=couple.myName||'';
+$('cfgStart').value=couple.startDate||'';$('cfgAnniv').value=couple.anniversaryDate||'';
+$('cfgColor').value=couple.color||'#A78BFA';$('cfgMascot').value=couple.mascot||'';
+$('cfgPhoto').value=couple.photo||'';$('cfgRoom').value=couple.coupleRoom||'';
+$('cfgSecret').value=couple.secret||'';
+$('spacePanel').hidden=false;
+};
+$('spaceClose').onclick=()=>$('spacePanel').hidden=true;
+$('cfgSave').onclick=async()=>{
+const body={herName:$('cfgHer').value,myName:$('cfgMy').value,startDate:$('cfgStart').value,anniversaryDate:$('cfgAnniv').value,color:$('cfgColor').value,mascot:$('cfgMascot').value,photo:$('cfgPhoto').value,coupleRoom:$('cfgRoom').value,secret:$('cfgSecret').value};
+try{
+const r=await fetch('/couple',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const d=await r.json();if(d.cfg)applyCouple(d.cfg);
+$('spacePanel').hidden=true;toast('Our space saved 💞','ok');
+}catch(_){toast('Could not save our space.','error');}
+};
+// Date-night jar + wheel
+const DATE_IDEAS=['Movie night + popcorn','Cook dinner together','Stargaze & talk','Walk & ice cream','Game night','Recreate your first date','Write each other a letter','Slow dance in the living room','Breakfast in bed','Photo walk'];
+let jarList=[];
+function renderJar(list){
+jarList=list||[];
+const el=$('jarList');
+el.innerHTML=jarList.map(n=>'<div class="jitem"><span>'+esc(n.text)+'</span><button class="jdel" data-id="'+esc(n.id)+'">✕</button></div>').join('')||'<div class="cpHint">Jar is empty — add your first note.</div>';
+el.querySelectorAll('.jdel').forEach(b=>b.onclick=()=>fetch('/jar/'+b.dataset.id,{method:'DELETE'}));
+}
+socket.on('jar',({list})=>renderJar(list));
+$('jarBtn').onclick=()=>{$('jarPanel').hidden=false;fetch('/jar').then(r=>r.json()).then(d=>renderJar(d.list)).catch(()=>{});};
+$('jarClose').onclick=()=>$('jarPanel').hidden=true;
+$('jarAdd').onclick=async()=>{const t=$('jarInput').value.trim();if(!t)return;await fetch('/jar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});$('jarInput').value='';};
+$('jarDraw').onclick=()=>{
+if(!jarList.length){$('jarDrawn').textContent='Jar is empty — add a note first.';return;}
+const n=jarList[Math.floor(Math.random()*jarList.length)];
+$('jarDrawn').textContent='💌 '+n.text;
+};
+let wheelAngle=0;
+$('spinBtn').onclick=()=>{
+const i=Math.floor(Math.random()*DATE_IDEAS.length);
+wheelAngle+=360*4+i*(360/DATE_IDEAS.length);
+$('wheel').style.transform='rotate('+wheelAngle+'deg)';
+$('wheelResult').textContent='';
+setTimeout(()=>{$('wheelResult').textContent='🎡 '+DATE_IDEAS[i];},3300);
+};
+// Hidden easter egg: tap mascot 7 times
+let mascotTaps=0,mascotTimer=null;
+$('homeMascot').onclick=()=>{
+mascotTaps++;clearTimeout(mascotTimer);mascotTimer=setTimeout(()=>mascotTaps=0,1500);
+if(mascotTaps>=7){mascotTaps=0;
+$('secretText').textContent=couple.secret||'I love you more than words can say. ♥';
+$('secretMascot').textContent=couple.mascot||'💌';
+$('secretPanel').hidden=false;}
+};
+$('secretClose').onclick=()=>$('secretPanel').hidden=true;
 
 socket.on('ready',({polite:p})=>{sys('Partner connected 🎉');toast('Partner connected 🎉','ok');createPeer(p);syncLocalTracks();socket.emit('set-name',{name:myName});setTimeout(()=>applyCallSpeaker(true),500);setTimeout(()=>applyCallSpeaker(true),2000)});
 socket.on('peer-left',()=>{

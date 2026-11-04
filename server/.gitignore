@@ -9,3 +9,5 @@ server.pid
 tunnel.pid
 *.backup-*.html
 .backup-*/
+couple.json
+jar.json
