@@ -80,7 +80,7 @@ app.get('/ice', (req, res) => {
                     // silently breaks TURN authentication).
                     if (e.username != null) entry.username = String(e.username).trim();
                     if (e.credential != null) entry.credential = String(e.credential).trim();
-                    const ph = /xxxx|your_metered/i.test(entry.username || '') || /xxx|your_metered/i.test(entry.credential || '');
+                    const ph = /xxxx|your_|placeholder/i.test(entry.username || '') || /xxx|your_|placeholder/i.test(entry.credential || '');
                     if (ph) continue; // skip redacted / example placeholders
                     clean.push(entry);
                 }

@@ -1,4 +1,5 @@
 [
   {"urls":"stun:stun.l.google.com:19302"},
-  {"urls":["turn:global.relay.metered.ca:80","turn:global.relay.metered.ca:443","turns:global.relay.metered.ca:443"],"username":"YOUR_METERED_USERNAME","credential":"YOUR_METERED_CREDENTIAL"}
+  {"urls":["turn:free.expressturn.com:3478","turn:free.expressturn.com:3478?transport=tcp"],
+   "username":"YOUR_TURN_USERNAME","credential":"YOUR_TURN_CREDENTIAL"}
 ]
