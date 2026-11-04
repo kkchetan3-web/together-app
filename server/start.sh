@@ -64,7 +64,7 @@ echo "==========================================="
 
 if command -v cloudflared >/dev/null 2>&1; then
   # http2 (TCP 443) is more reliable than QUIC on mobile/hotspot networks.
-  cloudflared tunnel --protocol http2 --url "http://localhost:${PORT}" > tunnel.log 2>&1 &
+  cloudflared tunnel --protocol http2 --edge-ip-version 4 --no-autoupdate --url "http://localhost:${PORT}" > tunnel.log 2>&1 &
   TUNNEL_PID=$!
   echo "$TUNNEL_PID" > tunnel.pid
   echo "Starting public link, please wait..."

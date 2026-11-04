@@ -193,6 +193,7 @@ io.on('connection', (s) => {
         s.data.room = room;
         s.data.cid = cid;
         if (!s.data.name) s.data.name = 'Guest';
+        console.log('[room] join room=' + room + ' peers=' + m.size + (created ? ' (created)' : ''));
 
         let peerName = null;
         for (const [otherCid, otherSockId] of m) {
@@ -207,6 +208,7 @@ io.on('connection', (s) => {
         s.emit('bookmarks', { list: roomBookmarks.get(room) || [] });
 
         if (m.size === 2) {
+            console.log('[room] ready (2 peers) room=' + room + ' — starting WebRTC negotiation');
             s.emit('ready', { polite: true });
             s.to(room).emit('ready', { polite: false });
         }
@@ -219,7 +221,14 @@ io.on('connection', (s) => {
     });
 
     ['signal', 'chat', 'screen-start', 'screen-stop', 'player', 'react', 'queue', 'typing', 'reaction'].forEach((ev) =>
-        s.on(ev, (d) => s.data.room && s.to(s.data.room).emit(ev, d))
+        s.on(ev, (d) => {
+            if (!s.data.room) return;
+            if (ev === 'signal') {
+                const k = d && d.description ? 'sdp:' + d.description.type : (d && d.candidate ? 'ice-candidate' : '?');
+                console.log('[signal] room=' + s.data.room + ' ' + k);
+            }
+            s.to(s.data.room).emit(ev, d);
+        })
     );
 
     // One-tap call restart: tell BOTH peers to rebuild the peer connection.
@@ -262,6 +271,7 @@ io.on('connection', (s) => {
         const m = rooms.get(r);
         if (m.get(s.data.cid) === s.id) {
             m.delete(s.data.cid);
+            console.log('[room] leave room=' + r + ' peers=' + m.size);
             s.to(r).emit('peer-left');
         }
     });
