@@ -106,10 +106,7 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 .camBox.pip.hidden::after{font-size:10px}
 #maxBackdrop{display:none;position:fixed;inset:0;background:rgba(11,8,23,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99998}
 
-/* MOVIE FULLSCREEN */
-body.is-fullscreen #app{padding:0 !important;display:block !important;grid-template-columns:none}
-body.is-fullscreen #bar,body.is-fullscreen #side{display:none !important}
-body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100dvh !important;border-radius:0 !important;z-index:1000 !important}
+
 
 /* QUEUE */
 #queue{display:none;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -186,7 +183,6 @@ body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !imp
 <button class="react">😂</button>
 <button class="react">😮</button>
 <button class="react">👏</button>
-<button id="fs">⛶</button>
 <div id="progWrap"><div id="progBar"></div></div>
 </div>
 </div>
@@ -403,19 +399,10 @@ if (cam === 'me' && pc) {
     };
 });
 
-// MOVIE FULLSCREEN
-function toggleMovieFs(){
-if(document.body.classList.contains('is-fullscreen')){
-document.body.classList.remove('is-fullscreen');
-$('fs').textContent='⛶';
-}else{
-document.body.classList.add('is-fullscreen');
-$('fs').textContent='↙';
-}
-}
-$('fs').onclick=toggleMovieFs;
-// Double-tap / double-click the movie itself to toggle fit-to-screen fullscreen.
-video.addEventListener('dblclick', (e) => { e.preventDefault(); toggleMovieFs(); });
+// MOVIE FULLSCREEN: handled solely by the native player fullscreen button
+// (controlsList no longer blocks it; the WebView wrapper implements
+// onShowCustomView). The old toolbar/CSS fullscreen was removed because it
+// hid the toolbar — including its own exit button — trapping the user.
 
 const anonId='Anon-'+Math.random().toString(36).slice(2,6).toUpperCase();
 function applyMyName(n){
