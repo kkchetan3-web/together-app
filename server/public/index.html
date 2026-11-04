@@ -967,47 +967,86 @@ $('upBtn').disabled=false;
 $('upStatus').textContent='Ready to upload';
 };
 const MAX_UPLOAD_GB=5;
-const isLocalHost=/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-$('upBtn').onclick=()=>{
+// Upload in 8 MB slices so each request stays well under the Cloudflare tunnel's
+// ~100 MB body cap AND its ~100 s request window on slow mobile uplinks.
+// Small slices also mean less to re-send after a drop. Works on localhost too.
+const CHUNK_SIZE=8*1024*1024;
+function uploadFail(msg){
+uploadInProgress=false;
+$('upStatus').textContent=msg;toast(msg,'error');
+$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;
+}
+function xhrSend(method,url,body,onProgress){
+return new Promise((resolve,reject)=>{
+const xhr=new XMLHttpRequest();
+xhr.open(method,url);
+xhr.timeout=0;
+if(onProgress&&xhr.upload)xhr.upload.onprogress=onProgress;
+xhr.onload=()=>{
+let j=null;try{j=JSON.parse(xhr.responseText)}catch(_){}
+if(xhr.status>=200&&xhr.status<300)resolve(j||{});
+else reject(Object.assign(new Error((j&&j.error)||('HTTP '+xhr.status)),{status:xhr.status,json:j}));
+};
+xhr.onerror=()=>reject(new Error('Network error'));
+xhr.ontimeout=()=>reject(new Error('Timeout'));
+xhr.send(body);
+});
+}
+async function queryNextChunk(uid){
+try{const j=await xhrSend('GET','/upload-status/'+room+'/'+uid,null);return Number(j&&j.next)||0;}catch(_){return null;}
+}
+$('upBtn').onclick=async()=>{
 if(!room)return;
 const f=$('upFile').files[0];
 if(!f)return alert('Choose a file first');
 if(f.size>MAX_UPLOAD_GB*1024**3)return toast('File too large (max '+MAX_UPLOAD_GB+' GB).','warn');
-if(!isLocalHost&&f.size>90*1024**2)toast('Public tunnel caps uploads near 100 MB. For big files, upload on the host device via localhost.','warn');
 uploadInProgress=true;
 $('upBtn').disabled=true;
 $('pickBtn').disabled=true;
 $('progWrap').style.display='block';
 $('progBar').style.width='0%';
 $('upStatus').textContent='Uploading 0%';
-const fd=new FormData();fd.append('video',f);
-const xhr=new XMLHttpRequest();
-xhr.open('POST','/upload/'+room);
-xhr.upload.onprogress=(e)=>{
+const uid=Array.from(crypto.getRandomValues(new Uint8Array(12))).map(b=>b.toString(16).padStart(2,'0')).join('');
+const totalChunks=Math.max(1,Math.ceil(f.size/CHUNK_SIZE));
+let index=0,sent=0;
+try{
+while(index<totalChunks){
+const start=index*CHUNK_SIZE;
+const blob=f.slice(start,Math.min(start+CHUNK_SIZE,f.size));
+const fd=new FormData();
+fd.append('uid',uid);fd.append('index',String(index));
+fd.append('totalChunks',String(totalChunks));fd.append('totalSize',String(f.size));
+fd.append('name',f.name);fd.append('chunk',blob,'chunk');
+let res;
+try{
+res=await xhrSend('POST','/upload-chunk/'+room,fd,(e)=>{
 if(!e.lengthComputable)return;
-const pct=Math.round((e.loaded/e.total)*100);
+const pct=Math.min(100,Math.round(((sent+e.loaded)/f.size)*100));
 $('progBar').style.width=pct+'%';
-$('upStatus').textContent='Uploading '+pct+'%';
-};
-xhr.onload=()=>{
-if(xhr.status===200){$('upStatus').textContent='Converting on server...'}
-else{
-uploadInProgress=false;
-let msg='Upload rejected';
-try{const j=JSON.parse(xhr.responseText);if(j&&j.error)msg=j.error;}catch(_){}
-if(xhr.status===413)msg='File too large (max '+MAX_UPLOAD_GB+' GB).';
-$('upStatus').textContent=msg;toast(msg,'error');
-$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;
+$('upStatus').textContent='Uploading '+pct+'% ('+(index+1)+'/'+totalChunks+')';
+});
+}catch(err){
+if(err.status===409||err.status===400||err.status===413||err.status===403)throw err;
+// Network hiccup: ask the server what it already has, then resume there.
+$('upStatus').textContent='Reconnecting…';
+await new Promise(r=>setTimeout(r,1500));
+const next=await queryNextChunk(uid);
+if(next===null)throw new Error('Connection lost. Check internet and upload again.');
+index=next;sent=index*CHUNK_SIZE;
+continue;
 }
-};
-xhr.onerror=()=>{
-uploadInProgress=false;
-$('upStatus').textContent='Upload failed.';
-$('progWrap').style.display='none';
-$('upBtn').disabled=false;
-$('pickBtn').disabled=false;
-};
-xhr.send(fd);
+if(res&&res.id){
+$('progBar').style.width='100%';
+$('upStatus').textContent='Converting on server...';
+return;
+}
+index=(res&&typeof res.next==='number')?res.next:index+1;
+sent=Math.min(f.size,index*CHUNK_SIZE);
+}
+$('upStatus').textContent='Converting on server...';
+}catch(err){
+uploadFail(err&&err.message?err.message:'Upload failed.');
+}
 };
 socket.on('processing',({name,percent})=>{
 if(percent<0){uploadInProgress=false;$('upStatus').textContent='Conversion failed';$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;return}

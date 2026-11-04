@@ -111,6 +111,30 @@ function normalizeCid(value) {
     return /^[A-Za-z0-9_-]{8,64}$/.test(cid) ? cid : null;
 }
 
+// Shared pipeline: takes a fully-uploaded temp file and converts it to HLS.
+function startProcessing(room, tmp, name) {
+    const id = crypto.randomBytes(12).toString('hex');
+    const outDir = path.join(mediaDir, id);
+    fs.mkdirSync(outDir, { recursive: true });
+    io.to(room).emit('processing', { name, percent: 0 });
+    queue = queue
+        .then(() => convert(tmp, outDir, (percent) => io.to(room).emit('processing', { name, percent })))
+        .then(({ hasSubs }) => {
+            const url = `/media/${id}/index.m3u8`;
+            const subs = hasSubs ? `/media/${id}/subs.vtt` : null;
+            roomState.set(room, { url, subs });
+            io.to(room).emit('player', { type: 'load', url, subs });
+            io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
+        })
+        .catch((err) => {
+            io.to(room).emit('chat', { name: 'System', text: 'Problem: ' + err.message });
+            io.to(room).emit('processing', { name, percent: -1 });
+        })
+        .finally(() => fs.unlink(tmp, () => {}));
+    return id;
+}
+
+// Legacy single-request upload (fine on localhost; tunnels cap request bodies).
 app.post('/upload/:room', (req, res, next) => {
     upload.single('video')(req, res, (err) => {
         if (err) {
@@ -128,28 +152,97 @@ app.post('/upload/:room', (req, res, next) => {
         return res.status(403).json({ error: 'Room not found' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file' });
-    const id = crypto.randomBytes(12).toString('hex');
-    const outDir = path.join(mediaDir, id);
-    fs.mkdirSync(outDir, { recursive: true });
-    const name = req.file.originalname;
-    const tmp = req.file.path;
-    res.json({ id });
-    io.to(room).emit('processing', { name, percent: 0 });
-    queue = queue
-        .then(() => convert(tmp, outDir, (percent) => io.to(room).emit('processing', { name, percent })))
-        .then(({ hasSubs }) => {
-            const url = `/media/${id}/index.m3u8`;
-            const subs = hasSubs ? `/media/${id}/subs.vtt` : null;
-            roomState.set(room, { url, subs });
-            io.to(room).emit('player', { type: 'load', url, subs });
-            io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
-        })
-        .catch((err) => {
-            io.to(room).emit('chat', { name: 'System', text: 'Problem: ' + err.message });
-            io.to(room).emit('processing', { name, percent: -1 });
-        })
-        .finally(() => fs.unlink(tmp, () => {}));
+    res.json({ id: startProcessing(room, req.file.path, req.file.originalname) });
 });
+
+// Chunked upload: 64 MB slices pass through Cloudflare's ~100 MB body cap.
+// Chunks arrive in order and are appended to a temp file; the last chunk
+// finalizes and starts conversion. /upload-status lets a client resume after
+// a dropped request without duplicating data.
+const UPLOAD_CHUNK_MAX = 96 * 1024 ** 2;
+const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_CHUNK_MAX } });
+const uploadSessions = new Map(); // uid -> { fd, tmp, room, name, totalSize, totalChunks, next, bytes, last }
+
+app.get('/upload-status/:room/:uid', (req, res) => {
+    const room = normalizeRoom(req.params.room);
+    const uid = String(req.params.uid || '');
+    if (!room || !/^[a-f0-9]{24}$/.test(uid)) return res.status(400).json({ error: 'Bad request' });
+    const s = uploadSessions.get(uid);
+    if (!s || s.room !== room) return res.json({ next: 0 });
+    res.json({ next: s.next, total: s.totalChunks });
+});
+
+app.post('/upload-chunk/:room', (req, res) => {
+    chunkUpload.single('chunk')(req, res, (err) => {
+        if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Chunk rejected: ' + err.message });
+        const room = normalizeRoom(req.params.room);
+        if (!room || !rooms.has(room)) return res.status(403).json({ error: 'Room not found' });
+        const b = req.body || {};
+        const uid = String(b.uid || '');
+        const index = Number(b.index), totalChunks = Number(b.totalChunks), totalSize = Number(b.totalSize);
+        const name = String(b.name || 'video').slice(0, 200);
+        if (!/^[a-f0-9]{24}$/.test(uid)) return res.status(400).json({ error: 'Bad upload id' });
+        if (!req.file || !req.file.buffer || !req.file.buffer.length) return res.status(400).json({ error: 'No chunk data' });
+        if (!Number.isInteger(index) || !Number.isInteger(totalChunks) || index < 0 || totalChunks < 1 || totalChunks > 100000 || index >= totalChunks)
+            return res.status(400).json({ error: 'Bad chunk index' });
+        if (!Number.isFinite(totalSize) || totalSize < 1) return res.status(400).json({ error: 'Bad file size' });
+        if (totalSize > MAX_UPLOAD_BYTES)
+            return res.status(413).json({ error: 'File too large (max ' + Math.round(MAX_UPLOAD_BYTES / 1024 ** 3) + ' GB).' });
+        let s = uploadSessions.get(uid);
+        if (!s) {
+            if (index !== 0) return res.status(409).json({ error: 'Upload must start at chunk 0', next: 0 });
+            const tmp = path.join(uploadsDir, uid + '.part');
+            let fd;
+            try { fd = fs.openSync(tmp, 'w'); } catch (e) { return res.status(500).json({ error: 'Cannot open temp file: ' + e.message }); }
+            s = { fd, tmp, room, name, totalSize, totalChunks, next: 0, bytes: 0, last: Date.now() };
+            uploadSessions.set(uid, s);
+        }
+        s.last = Date.now();
+        if (s.room !== room || s.totalSize !== totalSize || s.totalChunks !== totalChunks) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(409).json({ error: 'Upload metadata changed; start over', next: 0 });
+        }
+        if (index !== s.next) return res.status(409).json({ error: 'Unexpected chunk', next: s.next });
+        if (s.bytes + req.file.buffer.length > s.totalSize) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(413).json({ error: 'More data than declared file size' });
+        }
+        try { fs.writeSync(s.fd, req.file.buffer); } catch (e) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(500).json({ error: 'Disk write failed (storage full?): ' + e.message });
+        }
+        s.bytes += req.file.buffer.length;
+        s.next++;
+        if (s.next === s.totalChunks) {
+            try { fs.closeSync(s.fd); } catch {}
+            uploadSessions.delete(uid);
+            if (s.bytes !== s.totalSize) {
+                fs.unlink(s.tmp, () => {});
+                return res.status(400).json({ error: 'Size mismatch after final chunk' });
+            }
+            return res.json({ id: startProcessing(room, s.tmp, s.name) });
+        }
+        res.json({ ok: true, next: s.next });
+    });
+});
+
+// Abandon stale chunked uploads after 30 minutes so temp files don't pile up.
+setInterval(() => {
+    const now = Date.now();
+    for (const [uid, s] of uploadSessions) {
+        if (now - s.last > 30 * 60 * 1000) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+        }
+    }
+}, 60 * 1000).unref();
 
 // Size-capped chat image / GIF upload (feature 11). Returns a served URL.
 app.post('/chatimg/:room', (req, res) => {

@@ -7,7 +7,15 @@ function probe(file) {
             '-show_format', '-show_streams', file]);
         let out = '';
         p.stdout.on('data', (d) => (out += d));
-        p.on('close', (c) => (c === 0 ? resolve(JSON.parse(out)) : reject(new Error('Could not read this file'))));
+        // A missing/unspawnable binary emits 'error'; without this the whole
+        // server process would crash instead of reporting a failed conversion.
+        p.on('error', (e) => reject(new Error(e.code === 'ENOENT'
+            ? 'ffprobe is not installed. In Termux run: pkg install ffmpeg'
+            : 'Could not read this file: ' + e.message)));
+        p.on('close', (c) => {
+            if (c !== 0) return reject(new Error('Could not read this file'));
+            try { resolve(JSON.parse(out)); } catch { reject(new Error('Could not read this file')); }
+        });
     });
 }
 
@@ -41,11 +49,15 @@ async function convert(inputFile, outDir, onProgress) {
                 onProgress(Math.min(99, Math.round((t / duration) * 100)));
             }
         });
+        ff.on('error', (e) => reject(new Error(e.code === 'ENOENT'
+            ? 'ffmpeg is not installed. In Termux run: pkg install ffmpeg'
+            : 'Conversion failed: ' + e.message)));
         ff.on('close', (c) => (c === 0 ? resolve() : reject(new Error('Conversion failed (code ' + c + ')'))));
     });
 
     const hasSubs = await new Promise((resolve) => {
         const s = spawn('ffmpeg', ['-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]);
+        s.on('error', () => resolve(false)); // subtitles are optional
         s.on('close', (c) => resolve(c === 0));
     });
 
