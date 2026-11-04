@@ -187,6 +187,78 @@ html[data-theme="light"] .lobby-status.error{color:#D63A5C}
 html[data-theme="light"] .call-status.ok{color:#1E9E5A}
 html[data-theme="light"] .call-status.warn{color:#B26A00}
 
+/* ---- UX batch (features 3,4,6,8,11,16) ---- */
+#toasts{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:100001;pointer-events:none;width:max-content;max-width:92vw}
+.toast{padding:8px 14px;border-radius:999px;background:var(--glass-strong);border:1px solid var(--border);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);color:var(--text);font-size:13px;font-weight:600;box-shadow:var(--shadow-soft);animation:toastIn .25s ease;text-align:center}
+.toast.ok{border-color:rgba(126,226,168,.5);color:#7EE2A8}
+.toast.warn{border-color:rgba(255,196,107,.5);color:#FFC46B}
+.toast.error{border-color:rgba(240,80,110,.5);color:#FF9AAE}
+html[data-theme="light"] .toast.ok{color:#1E9E5A}
+html[data-theme="light"] .toast.warn{color:#B26A00}
+html[data-theme="light"] .toast.error{color:#D63A5C}
+@keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+#countOverlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(11,8,23,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:100002}
+#countOverlay[hidden]{display:none}
+#countNum{font-size:110px;font-weight:800;color:#fff;text-shadow:0 0 40px rgba(167,139,250,.8);animation:pop .9s ease}
+#countBy{color:var(--accent-2);font-size:14px;margin-top:8px}
+@keyframes pop{0%{transform:scale(.4);opacity:0}30%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}
+#chatHead{display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);border-top:1px solid var(--border);flex-shrink:0}
+#chatHead span:first-child{flex:1}
+#chatToggle{padding:2px 8px;font-size:12px;border-radius:8px}
+.badge{background:var(--danger);color:#fff;border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:16px;text-align:center}
+#typing{min-height:16px;padding:0 12px;font-size:11px;color:var(--text-muted);font-style:italic;flex-shrink:0}
+body.chat-hidden #log,body.chat-hidden #chatForm,body.chat-hidden #typing,body.chat-hidden #chatHead,body.chat-hidden #emojiPanel{display:none}
+#chatReopen{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:900;border-radius:999px;padding:10px 14px;font-size:18px;background:var(--grad);color:#fff;border:none;box-shadow:var(--shadow)}
+#chatReopen[hidden]{display:none}
+#chatReopen .badge{position:absolute;top:-4px;right:-4px}
+#emojiPanel{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:8px;border-top:1px solid var(--border);background:var(--glass);flex-shrink:0;max-height:120px;overflow-y:auto}
+#emojiPanel[hidden]{display:none}
+#emojiPanel button{padding:4px;font-size:18px;background:transparent;border:none;border-radius:8px}
+#emojiPanel button:hover{background:var(--glass-strong)}
+#log .chatImg{max-width:180px;max-height:140px;border-radius:12px;display:block;margin-top:4px;cursor:zoom-in;border:1px solid var(--border)}
+#log .ts{float:right;font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px}
+#log .reactions{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+#log .reactions button{padding:1px 7px;font-size:12px;border-radius:999px;background:var(--glass-strong);border:1px solid var(--border)}
+#log .reactions button.mine{border-color:var(--accent);background:rgba(167,139,250,.25)}
+#log .reactAdd{padding:0 6px;font-size:11px;border-radius:999px;background:transparent;border:1px dashed var(--border);color:var(--text-muted);margin-top:4px}
+#imgView{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:100003;cursor:zoom-out}
+#imgView[hidden]{display:none}
+#imgView img{max-width:94vw;max-height:92dvh;border-radius:12px}
+#bookmarks{display:none;border-bottom:1px solid var(--border);flex-shrink:0}
+#bookmarks.has{display:block;padding:6px 10px;max-height:90px;overflow-y:auto}
+#bookmarks .btitle{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+#bookmarks .bitem{display:flex;align-items:center;gap:6px;padding:4px 8px;font-size:12px;border-radius:10px;cursor:pointer;margin-bottom:2px}
+#bookmarks .bitem:hover{background:rgba(196,181,253,.08)}
+#bookmarks .btime{color:var(--accent-2);font-weight:700;font-variant-numeric:tabular-nums}
+#bookmarks .blabel{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bookmarks .bdel{padding:0 6px;font-size:11px;background:transparent;border:none;color:var(--text-muted)}
+#comfortPanel{position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top,0px));width:280px;max-width:92vw;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:14px;z-index:100004;display:flex;flex-direction:column;gap:10px}
+#comfortPanel[hidden]{display:none}
+.cpHead{display:flex;align-items:center;justify-content:space-between;font-size:14px}
+.cpHead button{padding:2px 8px;font-size:12px}
+.cpRow{display:flex;align-items:center;gap:8px;font-size:13px}
+.cpRow input[type="range"]{flex:1;padding:0}
+.cpHint{font-size:11px;color:var(--text-muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body.reduced-motion *,body.reduced-motion *::before,body.reduced-motion *::after{animation:none !important;transition:none !important;scroll-behavior:auto !important}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none !important;transition:none !important}}
+body.high-contrast{--text:#FFFFFF;--text-muted:#D8D2EE;--border:rgba(255,255,255,.5);--glass:rgba(255,255,255,.12);--glass-strong:rgba(255,255,255,.2)}
+html[data-theme="light"] body.high-contrast{--text:#000000;--text-muted:#333333;--border:rgba(0,0,0,.5);--glass:rgba(0,0,0,.06);--glass-strong:rgba(0,0,0,.12)}
+body{--tscale:1}
+#log,#log>div{font-size:calc(13px*var(--tscale))}
+#chatForm input{font-size:calc(13px*var(--tscale))}
+#typing{font-size:calc(11px*var(--tscale))}
+#queue .item,#bookmarks .bitem{font-size:calc(12px*var(--tscale))}
+@media (orientation: landscape) and (max-height: 520px){
+#app{grid-template-columns:1fr 300px;gap:8px;padding:8px}
+#profileCard{padding:8px}
+#videoGrid{padding:6px}
+.camBox{max-height:30dvh;min-height:80px}
+#bar{padding:4px 6px;gap:4px}
+#bar button{padding:6px 8px;font-size:11px}
+#lobby{margin:4vh auto;padding:18px}
+}
+
 /* RESPONSIVE */
 @media (max-width: 900px) or (orientation: portrait){
 #app{grid-template-columns:1fr;grid-template-rows:38dvh 1fr;gap:10px;padding:10px}
@@ -234,6 +306,9 @@ html[data-theme="light"] .call-status.warn{color:#B26A00}
 <button id="cam">📷 Cam</button>
 <button id="share">🖥 Share</button>
 <button id="syncBtn">⟲ Sync</button>
+<button id="countBtn" title="Start together after a 3-2-1 countdown">⏱ 3‑2‑1</button>
+<button id="markBtn" title="Bookmark this moment for both of you">🔖 Mark</button>
+<button id="comfortBtn" title="Comfort & accessibility">♿</button>
 <button id="copy">🔗 Invite</button>
 <button id="callSpeakerBtn" title="Call audio: Speaker">🔊 Call</button>
 <button class="react">❤️</button>
@@ -277,13 +352,41 @@ html[data-theme="light"] .call-status.warn{color:#B26A00}
 </div>
 
 <div id="queue"></div>
+<div id="bookmarks" aria-label="Shared bookmarks"></div>
+<div id="chatHead"><span>Chat</span><span id="unreadBadge" class="badge" hidden>0</span><button id="chatToggle" title="Hide / show chat" aria-label="Hide or show chat">▾</button></div>
 <div id="log"></div>
-<form id="chatForm"><input id="msg" placeholder="Message..." autocomplete="off"><button>Send</button></form>
+<div id="typing" aria-live="polite"></div>
+<form id="chatForm">
+<button type="button" id="emojiBtn" title="Emoji">😊</button>
+<button type="button" id="imgBtn" title="Send image / GIF (max 5 MB)">🖼</button>
+<input id="msg" placeholder="Message..." autocomplete="off">
+<button>Send</button>
+</form>
+<div id="emojiPanel" hidden></div>
 </div>
 </div>
 
 <!-- BACKDROP FOR MAXIMIZED -->
 <div id="maxBackdrop" onclick="minimizeAllCams()"></div>
+
+<!-- Toasts (feature 4) -->
+<div id="toasts" aria-live="polite"></div>
+<!-- Synced countdown overlay (feature 6) -->
+<div id="countOverlay" hidden><div id="countNum">3</div><div id="countBy"></div></div>
+<!-- Chat image lightbox (feature 11) -->
+<div id="imgView" hidden><img id="imgViewImg" alt="shared image"></div>
+<!-- Reopen chat pill (features 3 / 16) -->
+<button id="chatReopen" hidden title="Show chat">💬<span id="reopenBadge" class="badge" hidden>0</span></button>
+<!-- Comfort & accessibility panel (feature 16) -->
+<div id="comfortPanel" hidden role="dialog" aria-label="Comfort and accessibility">
+<div class="cpHead"><b>Comfort & accessibility</b><button id="comfortClose" title="Close">✕</button></div>
+<label class="cpRow"><input type="checkbox" id="cpMotion"> Reduce motion</label>
+<label class="cpRow"><input type="checkbox" id="cpContrast"> High contrast</label>
+<label class="cpRow">Text size <input type="range" id="cpText" min="100" max="150" step="10" value="100"><span id="cpTextVal">100%</span></label>
+<label class="cpRow"><input type="checkbox" id="cpSwipe" checked> Swipe sideways to hide chat</label>
+<div class="cpHint">Focus outlines are always on. Landscape phones get a compact layout automatically.</div>
+</div>
+<input type="file" id="imgFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/vendor/hls.min.js"></script>
@@ -361,7 +464,7 @@ let callSpeakerOn=true;
 let uploadInProgress=false;
 let joining=false;
 socket.on('disconnect',()=>{
-if(room)sys('Connection lost. Reconnecting…');
+if(room){sys('Connection lost. Reconnecting…');toast('Connection lost. Reconnecting…','warn');}
 else setLobbyStatus('Disconnected from server. Reconnecting…','error');
 setBusy(true);
 });
@@ -621,7 +724,7 @@ setLobbyStatus('Connected. Create or join a room.','ok');
 if(!room){setBusy(false);return}
 setBusy(true);
 joinRoom(room,true).then(res=>{
-sys('Reconnected ✅');
+sys('Reconnected ✅');toast('Reconnected ✅','ok');
 socket.emit('set-name',{name:myName});
 if(res.peerName){const pn=$('peerName');if(pn)pn.textContent=res.peerName}
 setBusy(false);
@@ -882,22 +985,239 @@ const d=document.createElement('div');
 if(cls)d.className=cls;
 d.innerHTML=html;
 $('log').appendChild(d);
-$('log').scrollTop=1e9;
+maybeAutoScroll();
 }
-const esc=(t)=>String(t).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc=(t)=>String(t).replace(/[&<>\"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const sys=(t)=>addLine(esc(t),'sys');
+
+// ---- Feature 3: timestamps, unread badge, typing ----
+let unread=0;
+const msgId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function logAtBottom(){const l=$('log');return l.scrollHeight-l.scrollTop-l.clientHeight<40;}
+function maybeAutoScroll(){if(logAtBottom()||!$('log').children.length)$('log').scrollTop=1e9;}
+function chatVisible(){return !document.hidden&&!document.body.classList.contains('chat-hidden');}
+function setUnread(n){
+unread=n;
+for(const id of ['unreadBadge','reopenBadge']){const el=$(id);if(el){el.textContent=n>99?'99+':n;el.hidden=n<=0;}}
+}
+function bumpUnread(){if(!chatVisible()||!logAtBottom())setUnread(unread+1);}
+function clearUnread(){setUnread(0);}
+$('log').addEventListener('scroll',()=>{if(logAtBottom()&&chatVisible())clearUnread();});
+document.addEventListener('visibilitychange',()=>{if(chatVisible()&&logAtBottom())clearUnread();});
+function fmtTs(ts){const d=new Date(ts||Date.now());return d.toTimeString().slice(0,5);}
+const reactionsByMsg=new Map();
+function renderReactions(box,id){
+let wrap=box.querySelector('.reactions');
+const map=reactionsByMsg.get(id);
+if(!map||!map.size){if(wrap)wrap.remove();return;}
+if(!wrap){wrap=document.createElement('div');wrap.className='reactions';box.appendChild(wrap);}
+wrap.innerHTML='';
+for(const [emoji,names] of map){
+const b=document.createElement('button');
+b.type='button';
+b.textContent=emoji+' '+names.size;
+if(names.has(myName))b.classList.add('mine');
+b.onclick=()=>socket.emit('reaction',{id,emoji,name:myName});
+wrap.appendChild(b);
+}
+}
+function addChat({id,name,text,image,ts,self}){
+id=id||msgId();
+const box=document.createElement('div');
+box.dataset.id=id;
+const when='<span class="ts">'+fmtTs(ts)+'</span>';
+const who=self?'You':esc(name);
+let inner=when+'<b>'+who+':</b> ';
+if(image){inner+='<img class="chatImg" alt="shared image" src="'+esc(image)+'">';}
+if(text){inner+=(image?'<br>':'')+esc(text);}
+box.innerHTML=inner;
+const add=document.createElement('button');
+add.type='button';add.className='reactAdd';add.textContent='＋ react';
+add.onclick=()=>openEmojiFor(id);
+box.appendChild(add);
+const img=box.querySelector('.chatImg');
+if(img)img.onclick=()=>{$('imgViewImg').src=img.src;$('imgView').hidden=false;};
+$('log').appendChild(box);
+renderReactions(box,id);
+if(self){$('log').scrollTop=1e9;}else{bumpUnread();maybeAutoScroll();}
+return box;
+}
 $('chatForm').onsubmit=(e)=>{
 e.preventDefault();
 const text=$('msg').value.trim();if(!text)return;
-socket.emit('chat',{name:myName,text});
-addLine('<b>You:</b> '+esc(text));
+const id=msgId();const ts=Date.now();
+socket.emit('chat',{id,name:myName,text,ts});
+addChat({id,name:myName,text,ts,self:true});
 $('msg').value='';
+emitTyping(false);
 };
-socket.on('chat',({name,text})=>addLine('<b>'+esc(name)+':</b> '+esc(text)));
+socket.on('chat',(m)=>{addChat({id:m.id,name:m.name,text:m.text,image:m.image,ts:m.ts,self:false});});
+socket.on('reaction',({id,emoji,name})=>{
+let map=reactionsByMsg.get(id);
+if(!map){map=new Map();reactionsByMsg.set(id,map);}
+let names=map.get(emoji);
+if(!names){names=new Set();map.set(emoji,names);}
+if(names.has(name))names.delete(name);else names.add(name);
+if(!names.size)map.delete(emoji);
+const box=$('log').querySelector('[data-id="'+id+'"]');
+if(box)renderReactions(box,id);
+});
+// typing indicator
+let typingTimer=null,typingSent=false;
+function emitTyping(on){
+if(on===typingSent)return;
+typingSent=on;
+socket.emit('typing',{name:myName,typing:on});
+}
+$('msg').addEventListener('input',()=>{
+emitTyping(true);
+clearTimeout(typingTimer);
+typingTimer=setTimeout(()=>emitTyping(false),1500);
+});
+let peerTypingTimer=null;
+socket.on('typing',({name,typing})=>{
+const el=$('typing');
+if(typing){el.textContent=(name||'Partner')+' is typing…';clearTimeout(peerTypingTimer);peerTypingTimer=setTimeout(()=>{el.textContent='';},2500);}
+else el.textContent='';
+});
+// chat hide / show (features 3 & 16)
+function setChatHidden(hidden){
+document.body.classList.toggle('chat-hidden',hidden);
+$('chatReopen').hidden=!hidden;
+$('chatToggle').textContent=hidden?'▸':'▾';
+if(!hidden){clearUnread();$('log').scrollTop=1e9;}
+}
+$('chatToggle').onclick=()=>setChatHidden(!document.body.classList.contains('chat-hidden'));
+$('chatReopen').onclick=()=>setChatHidden(false);
 
-socket.on('ready',({polite:p})=>{sys('Partner connected 🎉');createPeer(p);syncLocalTracks();socket.emit('set-name',{name:myName});setTimeout(()=>applyCallSpeaker(true),500);setTimeout(()=>applyCallSpeaker(true),2000)});
+// ---- Feature 4: toasts ----
+function toast(msg,kind){
+const t=document.createElement('div');
+t.className='toast'+(kind?' '+kind:'');
+t.textContent=msg;
+$('toasts').appendChild(t);
+setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),320);},3200);
+}
+
+// ---- Feature 11: emoji picker + image/GIF ----
+const EMOJIS=['❤️','😂','😮','👏','🥰','','😘','😊','😉','😍','🤗','','🙈','✨','🌙','☀️','','🎬','','💜','','💯','','👀'];
+function buildEmojiPanel(){
+const p=$('emojiPanel');p.innerHTML='';
+EMOJIS.forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.onclick=()=>{$('msg').value+=e;$('msg').focus();};p.appendChild(b);});
+}
+buildEmojiPanel();
+let emojiTargetMsg=null;
+function openEmojiFor(id){
+emojiTargetMsg=id;
+$('emojiPanel').hidden=false;
+}
+$('emojiBtn').onclick=()=>{emojiTargetMsg=null;$('emojiPanel').hidden=!$('emojiPanel').hidden;};
+$('emojiPanel').addEventListener('click',(e)=>{
+const b=e.target.closest('button');if(!b)return;
+if(emojiTargetMsg){socket.emit('reaction',{id:emojiTargetMsg,emoji:b.textContent,name:myName});$('emojiPanel').hidden=true;emojiTargetMsg=null;}
+});
+$('imgView').onclick=()=>{$('imgView').hidden=true;};
+$('imgBtn').onclick=()=>$('imgFile').click();
+$('imgFile').onchange=async()=>{
+const f=$('imgFile').files[0];$('imgFile').value='';
+if(!f)return;
+if(f.size>5*1024*1024)return toast('Image too large (max 5 MB).','warn');
+if(!room)return toast('Join a room first.','warn');
+const fd=new FormData();fd.append('image',f);
+try{
+const r=await fetch('/chatimg/'+room,{method:'POST',body:fd});
+const d=await r.json();
+if(d.error)return toast(d.error,'error');
+const id=msgId();const ts=Date.now();
+socket.emit('chat',{id,name:myName,image:d.url,ts});
+addChat({id,name:myName,image:d.url,ts,self:true});
+}catch(_){toast('Image upload failed.','error');}
+};
+
+// ---- Feature 8: shared bookmarks ----
+function fmtTime(s){s=Math.max(0,Math.floor(s||0));const m=Math.floor(s/60),ss=s%60;return m+':'+String(ss).padStart(2,'0');}
+function renderBookmarks(list){
+const el=$('bookmarks');
+if(!list||!list.length){el.className='';el.innerHTML='';return;}
+el.className='has';
+el.innerHTML='<div class="btitle">🔖 Bookmarks</div>'+list.map(b=>'<div class="bitem" data-id="'+esc(b.id)+'" data-time="'+b.time+'"><span class="btime">'+fmtTime(b.time)+'</span><span class="blabel">'+esc(b.label)+'</span><button class="bdel" data-del="'+esc(b.id)+'" title="Remove">✕</button></div>').join('');
+el.querySelectorAll('.bitem').forEach(it=>{
+it.onclick=(e)=>{
+if(e.target.closest('.bdel')){socket.emit('bookmark-remove',{id:e.target.closest('.bdel').dataset.del});return;}
+const t=Number(it.dataset.time);
+if(ytMode&&yt){yt.seekTo(t,true);}else video.currentTime=t;
+socket.emit('player',{type:'seek',time:t});
+toast('Jumped to '+fmtTime(t),'ok');
+};
+});
+}
+socket.on('bookmarks',({list})=>renderBookmarks(list));
+$('markBtn').onclick=()=>{
+const t=mediaTime();
+const label=(prompt('Label this moment:', 'Moment '+fmtTime(t))||'').trim()||('Moment '+fmtTime(t));
+socket.emit('bookmark-add',{time:t,label});
+toast('Bookmark added at '+fmtTime(t),'ok');
+};
+
+// ---- Feature 6: synced countdown ----
+let countTimer=null;
+function runCountdown(seconds,by){
+clearInterval(countTimer);
+const ov=$('countOverlay');ov.hidden=false;
+$('countBy').textContent=(by||'Partner')+' starts together';
+let n=seconds;
+const show=()=>{$('countNum').textContent=n>0?n:'▶';};
+show();
+if(ytMode&&yt){try{yt.pauseVideo()}catch(_){}}else video.pause();
+countTimer=setInterval(()=>{
+n--;
+if(n<=0){
+clearInterval(countTimer);
+show();
+setTimeout(()=>{ov.hidden=true;
+if(ytMode&&yt){ytPlay();}else video.play().catch(()=>toast('Tap the video once to allow playback','warn'));
+},400);
+}else show();
+},1000);
+}
+socket.on('countdown',({seconds,by})=>runCountdown(seconds,by));
+$('countBtn').onclick=()=>socket.emit('countdown',{seconds:3});
+
+// ---- Feature 16: comfort & accessibility ----
+const COMFORT_KEY='together-comfort';
+let comfort={motion:false,contrast:false,text:100,swipe:true};
+try{Object.assign(comfort,JSON.parse(localStorage.getItem(COMFORT_KEY)||'{}'));}catch(_){}
+function applyComfort(){
+document.body.classList.toggle('reduced-motion',!!comfort.motion);
+document.body.classList.toggle('high-contrast',!!comfort.contrast);
+document.body.style.setProperty('--tscale',(comfort.text||100)/100);
+$('cpMotion').checked=!!comfort.motion;
+$('cpContrast').checked=!!comfort.contrast;
+$('cpText').value=comfort.text||100;
+$('cpTextVal').textContent=(comfort.text||100)+'%';
+$('cpSwipe').checked=comfort.swipe!==false;
+try{localStorage.setItem(COMFORT_KEY,JSON.stringify(comfort));}catch(_){}
+}
+$('cpMotion').onchange=()=>{comfort.motion=$('cpMotion').checked;applyComfort();};
+$('cpContrast').onchange=()=>{comfort.contrast=$('cpContrast').checked;applyComfort();};
+$('cpText').oninput=()=>{comfort.text=Number($('cpText').value);applyComfort();};
+$('cpSwipe').onchange=()=>{comfort.swipe=$('cpSwipe').checked;applyComfort();};
+$('comfortBtn').onclick=()=>{$('comfortPanel').hidden=!$('comfortPanel').hidden;};
+$('comfortClose').onclick=()=>{$('comfortPanel').hidden=true;};
+applyComfort();
+// swipe sideways on the side panel to hide/show chat
+let swipeX=null,swipeY=null;
+$('side').addEventListener('touchstart',(e)=>{if(comfort.swipe===false)return;swipeX=e.touches[0].clientX;swipeY=e.touches[0].clientY;},{passive:true});
+$('side').addEventListener('touchend',(e)=>{
+if(swipeX==null)return;
+const dx=e.changedTouches[0].clientX-swipeX,dy=e.changedTouches[0].clientY-swipeY;
+swipeX=null;
+if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy)*1.5){setChatHidden(dx<0);}
+},{passive:true});
+
+socket.on('ready',({polite:p})=>{sys('Partner connected 🎉');toast('Partner connected 🎉','ok');createPeer(p);syncLocalTracks();socket.emit('set-name',{name:myName});setTimeout(()=>applyCallSpeaker(true),500);setTimeout(()=>applyCallSpeaker(true),2000)});
 socket.on('peer-left',()=>{
-sys('Partner left (they may be reconnecting)');
+sys('Partner left (they may be reconnecting)');toast('Partner left','warn');
 setCallStatus('closed');
 if(pc)pc.close();
 pc=null;
@@ -975,8 +1295,8 @@ screenStream=null;
 socket.emit('screen-stop');
 $('share').classList.remove('on');$('share').textContent='🖥 Share';
 }
-socket.on('screen-start',({streamId})=>{remoteScreenId=streamId;sys('Partner is sharing their screen')});
-socket.on('screen-stop',()=>{remoteScreenId=null;hideScreen();sys('Screen share ended')});
+socket.on('screen-start',({streamId})=>{remoteScreenId=streamId;sys('Partner is sharing their screen');toast('Partner is sharing their screen')});
+socket.on('screen-stop',()=>{remoteScreenId=null;hideScreen();sys('Screen share ended');toast('Screen share ended')});
 function hideScreen(){
 $('screen').srcObject=null;
 $('screen').style.display='none';

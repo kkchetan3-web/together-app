@@ -10,7 +10,7 @@ const { convert } = require('./lib/convert');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.1.0-room-fix';
+const VERSION = '2.2.0-ux-batch';
 
 const app = express();
 const server = http.createServer(app);
@@ -18,8 +18,10 @@ const io = new Server(server);
 
 const uploadsDir = path.join(ROOT, 'uploads');
 const mediaDir = path.join(ROOT, 'media');
+const chatImgDir = path.join(mediaDir, 'chat');
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(mediaDir, { recursive: true });
+fs.mkdirSync(chatImgDir, { recursive: true });
 
 app.get('/health', (req, res) => {
     res.json({
@@ -56,8 +58,10 @@ app.get('/ice', (req, res) => {
 });
 
 const upload = multer({ dest: uploadsDir, limits: { fileSize: 20 * 1024 ** 3 } });
+const chatImgUpload = multer({ dest: uploadsDir, limits: { fileSize: 5 * 1024 ** 2 } });
 const rooms = new Map();
 const roomState = new Map();
+const roomBookmarks = new Map();
 let queue = Promise.resolve();
 rooms.set('TOGETHER', new Map());
 
@@ -99,6 +103,37 @@ app.post('/upload/:room', upload.single('video'), (req, res) => {
         })
         .finally(() => fs.unlink(tmp, () => {}));
 });
+
+// Size-capped chat image / GIF upload (feature 11). Returns a served URL.
+app.post('/chatimg/:room', (req, res) => {
+    chatImgUpload.single('image')(req, res, (err) => {
+        if (err) {
+            const code = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+            return res.status(code).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Image too large (max 5 MB).' : 'Upload failed.' });
+        }
+        handleChatImg(req, res);
+    });
+});
+function handleChatImg(req, res) {
+    const room = normalizeRoom(req.params.room);
+    if (!room || !rooms.has(room)) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ error: 'Room not found' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No image' });
+    const mime = String(req.file.mimetype || '');
+    if (!/^image\/(png|jpe?g|gif|webp)$/.test(mime)) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(415).json({ error: 'Only PNG / JPG / GIF / WebP images are allowed.' });
+    }
+    const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : mime.includes('webp') ? 'webp' : 'jpg';
+    const id = crypto.randomBytes(10).toString('hex');
+    const dest = path.join(chatImgDir, `${id}.${ext}`);
+    fs.rename(req.file.path, dest, (err) => {
+        if (err) return res.status(500).json({ error: 'Could not save image' });
+        res.json({ url: `/media/chat/${id}.${ext}` });
+    });
+}
 
 app.delete('/delete/:room', (req, res) => {
     const room = normalizeRoom(req.params.room);
@@ -152,6 +187,7 @@ io.on('connection', (s) => {
 
         const state = roomState.get(room) || {};
         cb({ ok: true, room, created, url: state.url || null, subs: state.subs || null, peerName });
+        s.emit('bookmarks', { list: roomBookmarks.get(room) || [] });
 
         if (m.size === 2) {
             s.emit('ready', { polite: true });
@@ -165,9 +201,38 @@ io.on('connection', (s) => {
         s.to(s.data.room).emit('peer-name', { name: s.data.name });
     });
 
-    ['signal', 'chat', 'screen-start', 'screen-stop', 'player', 'react', 'queue'].forEach((ev) =>
+    ['signal', 'chat', 'screen-start', 'screen-stop', 'player', 'react', 'queue', 'typing', 'reaction'].forEach((ev) =>
         s.on(ev, (d) => s.data.room && s.to(s.data.room).emit(ev, d))
     );
+
+    // Synced 3-2-1 countdown (feature 6): broadcast to BOTH peers incl. sender.
+    s.on('countdown', (d) => {
+        if (!s.data.room) return;
+        const seconds = Math.min(10, Math.max(1, Number(d && d.seconds) || 3));
+        io.to(s.data.room).emit('countdown', { seconds, by: s.data.name || 'Partner' });
+    });
+
+    // Shared timestamp bookmarks (feature 8), stored per room on the server.
+    s.on('bookmark-add', (d) => {
+        const r = s.data.room;
+        if (!r) return;
+        const time = Number(d && d.time);
+        if (!Number.isFinite(time) || time < 0) return;
+        const label = String((d && d.label) || 'Moment').slice(0, 60);
+        const list = roomBookmarks.get(r) || [];
+        if (list.length >= 100) list.shift();
+        list.push({ id: crypto.randomBytes(6).toString('hex'), time, label, by: s.data.name || 'Guest' });
+        list.sort((a, b) => a.time - b.time);
+        roomBookmarks.set(r, list);
+        io.to(r).emit('bookmarks', { list });
+    });
+    s.on('bookmark-remove', (d) => {
+        const r = s.data.room;
+        if (!r) return;
+        const list = (roomBookmarks.get(r) || []).filter((b) => b.id !== (d && d.id));
+        roomBookmarks.set(r, list);
+        io.to(r).emit('bookmarks', { list });
+    });
 
     s.on('disconnect', () => {
         const r = s.data.room;
@@ -185,9 +250,16 @@ const cleanupTimer = setInterval(() => {
     let entries = [];
     try { entries = fs.readdirSync(mediaDir); } catch { return; }
     for (const d of entries) {
+        if (d === 'chat') continue;
         const p = path.join(mediaDir, d);
         try { if (Date.now() - fs.statSync(p).mtimeMs > week) fs.rmSync(p, { recursive: true, force: true }); } catch {}
     }
+    try {
+        for (const f of fs.readdirSync(chatImgDir)) {
+            const p = path.join(chatImgDir, f);
+            try { if (Date.now() - fs.statSync(p).mtimeMs > week) fs.rmSync(p, { force: true }); } catch {}
+        }
+    } catch {}
 }, 3600 * 1000);
 cleanupTimer.unref();
 
