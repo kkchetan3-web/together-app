@@ -139,7 +139,7 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 
 /* LIGHT THEME — additive overrides; dark (default) is untouched.
    Video wells/player stay dark in both themes (standard for video). */
-html[data-theme="light"]{
+html:is([data-theme="light"],[data-theme="cute"]){
   color-scheme:light;
   --bg:#F5F2FC;
   --glass:rgba(255,255,255,0.6);
@@ -154,21 +154,54 @@ html[data-theme="light"]{
   --shadow:0 12px 36px rgba(108,92,231,0.16);
   --shadow-soft:0 4px 24px rgba(108,92,231,0.12);
 }
-html[data-theme="light"] body{background-image:radial-gradient(circle at 12% 12%,rgba(167,139,250,0.18),transparent 46%),radial-gradient(circle at 88% 88%,rgba(124,106,239,0.14),transparent 46%),radial-gradient(circle at 50% 50%,rgba(196,181,253,0.25),transparent 72%)}
-html[data-theme="light"] #lobby h1{background:linear-gradient(135deg,#3A2E63 25%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-html[data-theme="light"] #bar{background:rgba(255,255,255,0.82)}
-html[data-theme="light"] #videoGrid{background:rgba(108,92,231,0.08)}
-html[data-theme="light"] #log{background:rgba(255,255,255,0.5)}
-html[data-theme="light"] #log>div{background:rgba(108,92,231,0.07);border-color:rgba(108,92,231,0.12)}
-html[data-theme="light"] #chatForm{background:rgba(255,255,255,0.6)}
-html[data-theme="light"] #progWrap{background:rgba(108,92,231,0.15)}
-html[data-theme="light"] #profileCard{background:rgba(108,92,231,0.07)}
-html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,0.3)}
-html[data-theme="light"] button:hover{background:rgba(108,92,231,0.14)}
-html[data-theme="light"] .lobby-status.ok{color:#1E9E5A}
-html[data-theme="light"] .lobby-status.error{color:#D63A5C}
-html[data-theme="light"] .call-status.ok{color:#1E9E5A}
-html[data-theme="light"] .call-status.warn{color:#B26A00}
+html:is([data-theme="light"],[data-theme="cute"]) body{background-image:radial-gradient(circle at 12% 12%,rgba(167,139,250,0.18),transparent 46%),radial-gradient(circle at 88% 88%,rgba(124,106,239,0.14),transparent 46%),radial-gradient(circle at 50% 50%,rgba(196,181,253,0.25),transparent 72%)}
+html:is([data-theme="light"],[data-theme="cute"]) #lobby h1{background:linear-gradient(135deg,#3A2E63 25%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+html:is([data-theme="light"],[data-theme="cute"]) #bar{background:rgba(255,255,255,0.82)}
+html:is([data-theme="light"],[data-theme="cute"]) #videoGrid{background:rgba(108,92,231,0.08)}
+html:is([data-theme="light"],[data-theme="cute"]) #log{background:rgba(255,255,255,0.5)}
+html:is([data-theme="light"],[data-theme="cute"]) #log>div{background:rgba(108,92,231,0.07);border-color:rgba(108,92,231,0.12)}
+html:is([data-theme="light"],[data-theme="cute"]) #chatForm{background:rgba(255,255,255,0.6)}
+html:is([data-theme="light"],[data-theme="cute"]) #progWrap{background:rgba(108,92,231,0.15)}
+html:is([data-theme="light"],[data-theme="cute"]) #profileCard{background:rgba(108,92,231,0.07)}
+html:is([data-theme="light"],[data-theme="cute"]) ::-webkit-scrollbar-thumb{background:rgba(108,92,231,0.3)}
+html:is([data-theme="light"],[data-theme="cute"]) button:hover{background:rgba(108,92,231,0.14)}
+html:is([data-theme="light"],[data-theme="cute"]) .lobby-status.ok{color:#1E9E5A}
+html:is([data-theme="light"],[data-theme="cute"]) .lobby-status.error{color:#D63A5C}
+html:is([data-theme="light"],[data-theme="cute"]) .call-status.ok{color:#1E9E5A}
+html:is([data-theme="light"],[data-theme="cute"]) .call-status.warn{color:#B26A00}
+
+/* CUTE THEME — pastel "strawberry milk" test theme (reversible via theme switch) */
+html[data-theme="cute"]{
+  color-scheme:light;
+  --bg:#FFF4F8;
+  --glass:rgba(255,255,255,0.7);
+  --glass-strong:rgba(255,255,255,0.9);
+  --border:rgba(247,108,138,0.25);
+  --text:#5C4652;
+  --text-muted:#A88795;
+  --accent:#F76C8A;
+  --accent-2:#E0567A;
+  --brand:#F76C8A;
+  --danger:#E0567A;
+  --radius-sm:18px;
+  --radius:26px;
+  --radius-lg:34px;
+  --shadow:0 12px 36px rgba(247,108,138,0.18);
+  --shadow-soft:0 4px 24px rgba(247,108,138,0.14);
+  --grad:linear-gradient(135deg,#FF9FB8 0%,#F76C8A 55%,#E0567A 100%);
+  --font:ui-rounded,'Hiragino Maru Gothic ProN','Quicksand','Comfortaa','SamsungOne','Inter',system-ui,sans-serif;
+}
+html[data-theme="cute"] body{background-image:radial-gradient(circle at 10% 12%,rgba(255,159,184,0.25),transparent 40%),radial-gradient(circle at 90% 85%,rgba(159,224,201,0.25),transparent 42%),radial-gradient(rgba(247,108,138,0.10) 1.5px,transparent 1.6px);background-size:auto,auto,22px 22px}
+html[data-theme="cute"] #lobby{border-radius:40px}
+html[data-theme="cute"] #lobby h1{background:linear-gradient(135deg,#E0567A 20%,#F79BB4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+html[data-theme="cute"] button,html[data-theme="cute"] input{border-radius:999px}
+html[data-theme="cute"] #side,html[data-theme="cute"] #stage{border-radius:32px}
+html[data-theme="cute"] .camBox{border-radius:24px}
+html[data-theme="cute"] #log{border-radius:22px}
+.cuteOnly{display:none}
+html[data-theme="cute"] .cuteOnly{display:block}
+.cuteMascot{font-size:44px;line-height:1;filter:drop-shadow(0 4px 10px rgba(247,108,138,0.35));animation:bob 3s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 
 /* RESPONSIVE */
 @media (max-width: 900px) or (orientation: portrait){
