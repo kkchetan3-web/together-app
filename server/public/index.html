@@ -441,6 +441,8 @@ const isAndroid=/Android/i.test(navigator.userAgent);
 // re-routing played remote audio twice and caused echo, so it is removed.
 function forceSpeakerRoute(){}
 function routeStreamToSpeaker(){}
+// play() may return undefined on old WebViews; never let it throw.
+function safePlay(el){if(!el)return;try{const p=el.play();if(p&&typeof p.catch==='function')p.catch(()=>{});}catch(e){}}
 function setCallStatus(state){
 const el=$('callStatus');if(!el)return;
 const map={new:'Setting up call…',checking:'Connecting call…',connecting:'Connecting call…',connected:'Call connected',completed:'Call connected',disconnected:'Reconnecting call…',failed:'Reconnecting call…',closed:'Call ended'};
@@ -455,6 +457,10 @@ const cid=sessionStorage.cid||(sessionStorage.cid=Math.random().toString(36).sli
 let room,myName='Me',polite=false,pc;
 let localStream=null,screenStream=null,screenSenders=[];
 let remoteScreenId=null,makingOffer=false,ignoreOffer=false;
+// Accumulate remote tracks into ONE stream (fixes video being overwritten by
+// the audio track when ontrack fires with empty e.streams), and buffer ICE
+// candidates until the remote description is set.
+let remoteStream=null,pendingCandidates=[];
 let remote=false,hls=null,resumeAfter=false;
 let playlist=[],currentIdx=-1;
 // YouTube synced playback state
@@ -691,7 +697,7 @@ joining=false;setBusy(false);
 }
 
 async function ensureLocalMedia(){
-if(localStream){$('me').srcObject=localStream;syncLocalTracks();return}
+if(localStream){$('me').srcObject=localStream;safePlay($('me'));syncLocalTracks();return}
 if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
 sys('Camera/mic is not available in this browser. You can still watch and chat.');
 return;
@@ -702,7 +708,7 @@ localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:t
 try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}
 catch(e2){localStream=null}
 }
-if(localStream){$('me').srcObject=localStream;syncLocalTracks()}
+if(localStream){$('me').srcObject=localStream;safePlay($('me'));syncLocalTracks()}
 else sys('Camera/mic permission was denied or unavailable. You can still watch and chat.');
 }
 
@@ -1221,12 +1227,15 @@ sys('Partner left (they may be reconnecting)');toast('Partner left','warn');
 setCallStatus('closed');
 if(pc)pc.close();
 pc=null;
+remoteStream=null;pendingCandidates=[];
 $('them').srcObject=null;
 hideScreen();
 });
 function createPeer(p){
 if(pc)pc.close();
 polite=p;makingOffer=false;ignoreOffer=false;remoteScreenId=null;
+remoteStream=new MediaStream();pendingCandidates=[];
+$('them').srcObject=remoteStream;
 pc=new RTCPeerConnection(ICE);
 setCallStatus('checking');
 pc.onconnectionstatechange=()=>setCallStatus(pc.connectionState);
@@ -1240,11 +1249,17 @@ $('screen').srcObject=stream;
 $('screen').style.display='block';
 video.style.display='none';
 $('ytWrap').style.display='none';
-}else{
-$('them').srcObject=stream||new MediaStream([e.track]);
-try{routeStreamToSpeaker($('them').srcObject)}catch(e){}
-forceSpeakerRoute();
+return;
 }
+// Add into the single remote stream instead of replacing srcObject per track.
+if(remoteStream){if(!remoteStream.getTracks().includes(e.track))remoteStream.addTrack(e.track);}
+else{remoteStream=new MediaStream([e.track]);}
+$('them').srcObject=remoteStream;
+const play=()=>{const v=$('them');if(v&&v.paused)safePlay(v);};
+play();
+e.track.addEventListener('unmute',play);
+try{routeStreamToSpeaker(remoteStream)}catch(err){}
+forceSpeakerRoute();
 };
 pc.onicecandidate=({candidate})=>candidate&&socket.emit('signal',{candidate});
 pc.onnegotiationneeded=async()=>{
@@ -1252,6 +1267,11 @@ try{makingOffer=true;await pc.setLocalDescription();socket.emit('signal',{descri
 catch(err){console.error(err)}
 finally{makingOffer=false}
 };
+}
+async function flushCandidates(){
+if(!pc||!pc.remoteDescription)return;
+const q=pendingCandidates;pendingCandidates=[];
+for(const c of q){try{await pc.addIceCandidate(c)}catch(e){}}
 }
 socket.on('signal',async({description,candidate})=>{
 if(!pc)return;
@@ -1261,8 +1281,11 @@ const collision=description.type==='offer'&&(makingOffer||pc.signalingState!=='s
 ignoreOffer=!polite&&collision;
 if(ignoreOffer)return;
 await pc.setRemoteDescription(description);
+await flushCandidates();
 if(description.type==='offer'){await pc.setLocalDescription();socket.emit('signal',{description:pc.localDescription})}
 }else if(candidate){
+// Buffer until remote description exists, otherwise early candidates are lost.
+if(!pc.remoteDescription){pendingCandidates.push(candidate);return;}
 try{await pc.addIceCandidate(candidate)}catch(e){if(!ignoreOffer)throw e}
 }
 }catch(err){console.error(err)}
