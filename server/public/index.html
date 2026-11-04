@@ -78,7 +78,10 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #side{display:flex;flex-direction:column;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow);min-height:0}
 
 /* CALL STATUS */
-.call-status{padding:8px 14px;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(167,139,250,0.06);flex-shrink:0;display:flex;align-items:center;gap:7px}
+.call-status{padding:8px 14px;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(167,139,250,0.06);flex-shrink:0;display:flex;align-items:center;gap:7px;cursor:pointer}
+.diagBody{font-size:12px;line-height:1.6;color:var(--text);background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:10px;white-space:pre-wrap;font-variant-numeric:tabular-nums;max-height:40dvh;overflow-y:auto}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:340px;max-width:94vw;max-height:88dvh;overflow-y:auto;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:16px;z-index:100005;display:flex;flex-direction:column;gap:10px}
+.modal[hidden]{display:none}
 .call-status::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
 .call-status.ok{color:#7EE2A8}.call-status.ok::before{background:#7EE2A8;box-shadow:0 0 8px rgba(126,226,168,.7)}
 .call-status.warn{color:#FFC46B}.call-status.warn::before{background:#FFC46B;box-shadow:0 0 8px rgba(255,196,107,.7)}
@@ -388,6 +391,15 @@ body{--tscale:1}
 </div>
 <input type="file" id="imgFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
 
+<!-- Call doctor (tap the call-status chip) -->
+<div id="callDiag" class="modal" hidden role="dialog" aria-label="Call diagnostics">
+<div class="cpHead"><b>🩺 Call doctor</b><button id="diagClose" title="Close">✕</button></div>
+<div id="diagBody" class="diagBody">…</div>
+<button id="diagRestart">🔄 Restart call</button>
+<button id="diagCam">📷 Enable / retry camera & mic</button>
+<div class="cpHint">If "relay" appears below, the call is going through TURN (needed across different networks). If it stays "checking", check both devices' internet.</div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="/vendor/hls.min.js"></script>
 <script>
@@ -432,8 +444,23 @@ $('join').disabled=busy||!socket.connected;
 }
 setBusy(true);
 
-const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
-fetch('/ice').then(r=>r.json()).then(list=>{ICE.iceServers=list}).catch(()=>{});
+// Fallback public STUN + TURN so calls still connect across different networks
+// (mobile data <-> Wi-Fi) even if turn.txt is missing/expired. TURN only relays
+// already-encrypted SRTP; it cannot read your media.
+const FALLBACK_ICE=[
+{urls:'stun:stun.l.google.com:19302'},
+{urls:'stun:stun1.l.google.com:19302'},
+{urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
+{urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
+{urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
+];
+const ICE={iceServers:FALLBACK_ICE.slice(),iceCandidatePoolSize:2};
+fetch('/ice').then(r=>r.json()).then(list=>{
+if(Array.isArray(list)&&list.length){
+// User-provided TURN (turn.txt) first, then public fallbacks.
+ICE.iceServers=list.concat(FALLBACK_ICE);
+}
+}).catch(()=>{});
 
 const isAndroid=/Android/i.test(navigator.userAgent);
 // Call audio is routed by the Android wrapper (AndroidSpeaker) and plays
@@ -1238,7 +1265,10 @@ remoteStream=new MediaStream();pendingCandidates=[];
 $('them').srcObject=remoteStream;
 pc=new RTCPeerConnection(ICE);
 setCallStatus('checking');
-pc.onconnectionstatechange=()=>setCallStatus(pc.connectionState);
+pc.onconnectionstatechange=()=>{
+setCallStatus(pc.connectionState);
+if(pc.connectionState==='connected'){syncLocalTracks();safePlay($('them'));safePlay($('me'));}
+};
 pc.oniceconnectionstatechange=()=>{if(pc.iceConnectionState==='failed'){try{pc.restartIce()}catch(e){}}setCallStatus(pc.iceConnectionState)};
 if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
 else{pc.addTransceiver('audio',{direction:'sendrecv'});pc.addTransceiver('video',{direction:'sendrecv'})}
@@ -1290,6 +1320,46 @@ try{await pc.addIceCandidate(candidate)}catch(e){if(!ignoreOffer)throw e}
 }
 }catch(err){console.error(err)}
 });
+// ---- Call doctor + one-tap restart ----
+socket.on('call-restart',()=>{toast('Restarting call…');createPeer(polite);syncLocalTracks();});
+let diagTimer=null;
+function diagText(){
+const L=[];
+L.push('Connection: '+(pc?pc.connectionState:'no peer')+' / ICE: '+(pc?pc.iceConnectionState:'-'));
+L.push('Your camera/mic: '+(localStream?localStream.getTracks().map(t=>t.kind+(t.enabled?'':'(off)')).join(', '):'none (permission?)'));
+L.push('Partner tracks: '+(remoteStream&&remoteStream.getTracks().length?remoteStream.getTracks().map(t=>t.kind+(t.muted?'(waiting)':'')).join(', '):'none yet'));
+return L.join('\n');
+}
+async function diagStats(){
+let extra='';
+if(pc&&pc.getStats){
+try{
+const stats=await pc.getStats();
+let pair=null,local=null,remote=null;
+stats.forEach(r=>{if(r.type==='transport'&&r.selectedCandidatePairId){pair=r.selectedCandidatePairId;}});
+stats.forEach(r=>{if(r.type==='candidate-pair'&&r.id===pair){local=r.localCandidateId;remote=r.remoteCandidateId;}});
+let lt='',rt='';
+stats.forEach(r=>{if(r.type==='local-candidate'&&r.id===local)lt=r.candidateType; if(r.type==='remote-candidate'&&r.id===remote)rt=r.candidateType;});
+if(lt||rt)extra='\nPath: '+lt+' ↔ '+rt+(lt==='relay'||rt==='relay'?' (TURN relay)':'');
+}catch(e){}
+}
+return extra;
+}
+function refreshDiag(){
+if($('callDiag').hidden)return;
+diagText && ($('diagBody').textContent=diagText());
+diagStats().then(x=>{if(!$('callDiag').hidden)$('diagBody').textContent=diagText()+x;});
+}
+$('callStatus').onclick=()=>{
+const d=$('callDiag');
+d.hidden=!d.hidden;
+if(!d.hidden){refreshDiag();clearInterval(diagTimer);diagTimer=setInterval(refreshDiag,2000);}
+else clearInterval(diagTimer);
+};
+$('diagClose').onclick=()=>{$('callDiag').hidden=true;clearInterval(diagTimer);};
+$('diagRestart').onclick=()=>{socket.emit('call-restart');};
+$('diagCam').onclick=async()=>{await ensureLocalMedia();refreshDiag();if(localStream)toast('Camera/mic enabled','ok');};
+
 function toggle(kind,btn,label){
 const t=localStream&&localStream.getTracks().find(x=>x.kind===kind);
 if(!t)return alert('No '+kind+' available');

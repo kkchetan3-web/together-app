@@ -205,6 +205,11 @@ io.on('connection', (s) => {
         s.on(ev, (d) => s.data.room && s.to(s.data.room).emit(ev, d))
     );
 
+    // One-tap call restart: tell BOTH peers to rebuild the peer connection.
+    s.on('call-restart', () => {
+        if (s.data.room) io.to(s.data.room).emit('call-restart');
+    });
+
     // Synced 3-2-1 countdown (feature 6): broadcast to BOTH peers incl. sender.
     s.on('countdown', (d) => {
         if (!s.data.room) return;
