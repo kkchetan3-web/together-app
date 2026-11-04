@@ -97,6 +97,13 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 .camBox.maximized .camControls{top:calc(10px + env(safe-area-inset-top,0px));bottom:auto;right:10px}
 .camBox.maximized .camControls button{font-size:15px;padding:10px 16px;background:rgba(11,8,23,0.85);border-color:var(--accent)}
 .camBox.maximized .camLabel{font-size:14px;top:calc(12px + env(safe-area-inset-top,0px));left:12px}
+/* Picture-in-picture: while one camera is maximized, the other floats in a corner */
+.camBox.pip{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;left:auto;bottom:auto;width:clamp(110px,26vw,240px);aspect-ratio:16/9;max-height:none;min-height:0;flex:none;z-index:100000;border:2px solid var(--accent);border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.65);background:#0b0817;cursor:grab;touch-action:none}
+.camBox.pip:active{cursor:grabbing}
+.camBox.pip video{object-fit:cover}
+.camBox.pip .camControls{display:none}
+.camBox.pip .camLabel{font-size:10px;top:4px;left:6px;padding:2px 6px}
+.camBox.pip.hidden::after{font-size:10px}
 #maxBackdrop{display:none;position:fixed;inset:0;background:rgba(11,8,23,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99998}
 
 /* MOVIE FULLSCREEN */
@@ -287,7 +294,10 @@ $('callSpeakerBtn').onclick=()=>applyCallSpeaker(!callSpeakerOn);
 // NOTE: #side has backdrop-filter, which traps position:fixed descendants.
 // So a maximized camBox is moved to <body> and restored to #videoGrid on exit.
 function minimizeAllCams() {
-    document.querySelectorAll('.camBox.maximized').forEach(b => b.classList.remove('maximized'));
+    document.querySelectorAll('.camBox').forEach(b => {
+        b.classList.remove('maximized', 'pip');
+        b.style.left = ''; b.style.top = ''; b.style.right = ''; b.style.bottom = '';
+    });
     const grid = $('videoGrid');
     grid.appendChild($('boxMe'));
     grid.appendChild($('boxThem'));
@@ -298,12 +308,16 @@ function minimizeAllCams() {
 
 function toggleMaxCam(cam) {
     const box = cam === 'me' ? $('boxMe') : $('boxThem');
+    const other = cam === 'me' ? $('boxThem') : $('boxMe');
     if (box.classList.contains('maximized')) { minimizeAllCams(); return; }
     minimizeAllCams();
     document.body.appendChild(box);
     box.classList.add('maximized');
     const btn = box.querySelector('.btnToggleMax');
     if (btn) btn.textContent = 'Exit';
+    // Picture-in-picture: the other camera floats in a corner of the maximized view
+    document.body.appendChild(other);
+    other.classList.add('pip');
     $('maxBackdrop').style.display = 'block';
     document.body.classList.add('cam-max');
 }
@@ -315,20 +329,51 @@ document.querySelectorAll('.btnToggleMax').forEach(btn => {
     };
 });
 
-// Double-click / double-tap a camera to maximize; Esc or backdrop tap to exit.
+// Double-click / double-tap a grid camera to maximize; Esc or backdrop tap to exit.
+// The floating PiP tile is handled separately (drag to move, tap to swap).
 document.querySelectorAll('.camBox').forEach(box => {
     const cam = box.id === 'boxMe' ? 'me' : 'them';
     box.addEventListener('dblclick', (e) => {
+        if (box.classList.contains('pip')) return;
         if (e.target.closest('.camControls')) return;
         toggleMaxCam(cam);
     });
     let lastTap = 0;
     box.addEventListener('touchend', (e) => {
+        if (box.classList.contains('pip')) return;
         if (e.target.closest('.camControls')) return;
         const now = Date.now();
         if (now - lastTap < 350) { e.preventDefault(); toggleMaxCam(cam); }
         lastTap = now;
     });
+
+    // PiP: drag to reposition anywhere on screen; a simple tap swaps which camera is big.
+    let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    box.addEventListener('pointerdown', (e) => {
+        if (!box.classList.contains('pip')) return;
+        dragging = true; moved = false;
+        sx = e.clientX; sy = e.clientY;
+        const r = box.getBoundingClientRect();
+        ox = r.left; oy = r.top;
+        if (box.setPointerCapture) { try { box.setPointerCapture(e.pointerId); } catch (_) {} }
+    });
+    box.addEventListener('pointermove', (e) => {
+        if (!dragging || !box.classList.contains('pip')) return;
+        const dx = e.clientX - sx, dy = e.clientY - sy;
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+        if (!moved) return;
+        const r = box.getBoundingClientRect();
+        const nx = Math.max(4, Math.min(window.innerWidth - r.width - 4, ox + dx));
+        const ny = Math.max(4, Math.min(window.innerHeight - r.height - 4, oy + dy));
+        box.style.left = nx + 'px'; box.style.top = ny + 'px';
+        box.style.right = 'auto'; box.style.bottom = 'auto';
+    });
+    box.addEventListener('pointerup', () => {
+        if (!dragging) return;
+        dragging = false;
+        if (box.classList.contains('pip') && !moved) toggleMaxCam(cam);
+    });
+    box.addEventListener('pointercancel', () => { dragging = false; });
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') minimizeAllCams(); });
 
