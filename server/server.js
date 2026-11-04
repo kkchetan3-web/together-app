@@ -5,7 +5,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { convert } = require('./lib/convert');
+const { convert, probePartial, startStreamConvert } = require('./lib/convert');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
@@ -111,11 +111,19 @@ function normalizeCid(value) {
     return /^[A-Za-z0-9_-]{8,64}$/.test(cid) ? cid : null;
 }
 
+// Every media folder a room creates, so "clear from room" can delete them all.
+const roomMedia = new Map(); // room -> Set(mediaId)
+function trackMedia(room, id) {
+    if (!roomMedia.has(room)) roomMedia.set(room, new Set());
+    roomMedia.get(room).add(id);
+}
+
 // Shared pipeline: takes a fully-uploaded temp file and converts it to HLS.
 function startProcessing(room, tmp, name) {
     const id = crypto.randomBytes(12).toString('hex');
     const outDir = path.join(mediaDir, id);
     fs.mkdirSync(outDir, { recursive: true });
+    trackMedia(room, id);
     io.to(room).emit('processing', { name, percent: 0 });
     queue = queue
         .then(() => convert(tmp, outDir, (percent) => io.to(room).emit('processing', { name, percent })))
@@ -155,10 +163,85 @@ app.post('/upload/:room', (req, res, next) => {
     res.json({ id: startProcessing(room, req.file.path, req.file.originalname) });
 });
 
-// Chunked upload: 64 MB slices pass through Cloudflare's ~100 MB body cap.
+// ---- Progressive playback: watch while the file is still uploading ----
+// Slices are appended to the temp file AND piped into ffmpeg, which writes a
+// growing HLS playlist. As soon as the first segments exist both peers are
+// told to load it from position 0 at the same wall-clock moment, so MKV/large
+// files start together instead of waiting for the whole upload.
+function feedStdin(ff, buf) {
+    return new Promise((resolve) => {
+        if (!ff || !ff.stdin || ff.stdin.destroyed) return resolve(false);
+        // Resolving on the write callback gives natural backpressure: if ffmpeg
+        // is slower than the network, slice POSTs slow down instead of buffering
+        // the whole movie in RAM.
+        ff.stdin.write(buf, () => resolve(true));
+    });
+}
+
+function announceLive(s) {
+    if (s.announced || !s.outDir) return;
+    const playlist = path.join(s.outDir, 'index.m3u8');
+    try {
+        const txt = fs.readFileSync(playlist, 'utf8');
+        const segments = (txt.match(/#EXTINF:/g) || []).length;
+        if (segments < 1) return; // hls.js can start here and keep polling for more
+        s.announced = true;
+        if (s.poller) { clearInterval(s.poller); s.poller = null; }
+        const url = `/media/${s.mediaId}/index.m3u8`;
+        roomState.set(s.room, { url, subs: null, live: true });
+        trackMedia(s.room, s.mediaId);
+        // Same start instant for both peers -> simultaneous start.
+        io.to(s.room).emit('player', { type: 'load', url, subs: null, live: true, startAt: Date.now() + 3000 });
+        io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" is playing while it uploads. Both of you start together.` });
+    } catch {}
+}
+
+async function tryStartLive(s, endOffset) {
+    let info;
+    try { info = await probePartial(s.tmp); } catch { return; } // not enough data yet; retry on a later slice
+    const v = (info.streams || []).find((x) => x.codec_type === 'video');
+    const a = (info.streams || []).find((x) => x.codec_type === 'audio');
+    if (!v) { s.live = false; return; }
+    const copyV = v.codec_name === 'h264';
+    const copyA = !!a && a.codec_name === 'aac' && a.channels <= 2;
+    s.mediaId = crypto.randomBytes(12).toString('hex');
+    s.outDir = path.join(mediaDir, s.mediaId);
+    try { fs.mkdirSync(s.outDir, { recursive: true }); } catch { s.live = false; return; }
+    const ff = startStreamConvert(s.outDir, { copyV, copyA });
+    s.ff = ff;
+    s.live = true;
+    ff.on('error', () => { s.live = false; s.ff = null; });
+    ff.on('close', (code) => {
+        s.ffExited = true;
+        if (code === 0 && s.outDir) {
+            // Turn the growing EVENT playlist into a finished VOD.
+            const pl = path.join(s.outDir, 'index.m3u8');
+            try {
+                const txt = fs.readFileSync(pl, 'utf8');
+                if (!txt.includes('#EXT-X-ENDLIST')) fs.appendFileSync(pl, '#EXT-X-ENDLIST\n');
+            } catch {}
+            announceLive(s);
+            io.to(s.room).emit('player', { type: 'vod', url: `/media/${s.mediaId}/index.m3u8` });
+        } else if (!s.finalized) {
+            s.live = false; s.ff = null; // fall back to converting the whole file at the end
+        }
+    });
+    s.poller = setInterval(() => announceLive(s), 700);
+    s.poller.unref();
+    // Feed everything received so far, in order, before later slices.
+    const prefix = fs.readFileSync(s.tmp, { encoding: null, flag: 'r' }).subarray(0, endOffset);
+    await feedStdin(ff, prefix);
+}
+
+function stopLive(s) {
+    if (s.poller) { clearInterval(s.poller); s.poller = null; }
+    if (s.ff) { try { s.ff.stdin.end(); } catch {} try { s.ff.kill('SIGKILL'); } catch {} s.ff = null; }
+}
+
+// Chunked upload: small slices pass through Cloudflare's ~100 MB body cap.
 // Chunks arrive in order and are appended to a temp file; the last chunk
-// finalizes and starts conversion. /upload-status lets a client resume after
-// a dropped request without duplicating data.
+// finalizes the stream. /upload-status lets a client resume after a dropped
+// request without duplicating data.
 const UPLOAD_CHUNK_MAX = 96 * 1024 ** 2;
 const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_CHUNK_MAX } });
 const uploadSessions = new Map(); // uid -> { fd, tmp, room, name, totalSize, totalChunks, next, bytes, last }
@@ -194,7 +277,8 @@ app.post('/upload-chunk/:room', (req, res) => {
             const tmp = path.join(uploadsDir, uid + '.part');
             let fd;
             try { fd = fs.openSync(tmp, 'w'); } catch (e) { return res.status(500).json({ error: 'Cannot open temp file: ' + e.message }); }
-            s = { fd, tmp, room, name, totalSize, totalChunks, next: 0, bytes: 0, last: Date.now() };
+            s = { fd, tmp, room, name, totalSize, totalChunks, next: 0, bytes: 0, last: Date.now(),
+                  live: null, ff: null, mediaId: null, outDir: null, announced: false, chain: null, poller: null, finalized: false };
             uploadSessions.set(uid, s);
         }
         s.last = Date.now();
@@ -217,18 +301,44 @@ app.post('/upload-chunk/:room', (req, res) => {
             uploadSessions.delete(uid);
             return res.status(500).json({ error: 'Disk write failed (storage full?): ' + e.message });
         }
-        s.bytes += req.file.buffer.length;
+        const buf = req.file.buffer;
+        s.bytes += buf.length;
+        const endOffset = s.bytes;
         s.next++;
-        if (s.next === s.totalChunks) {
+        const isFinal = s.next === s.totalChunks;
+        // Serialize progressive-feed work so slices reach ffmpeg in order and
+        // the probe's prefix never overlaps a later slice.
+        s.chain = (s.chain || Promise.resolve()).then(async () => {
+            if (s.live === null) {
+                // Keep trying as more of the file arrives (a partial container may
+                // not be readable yet). Give up after 8 attempts -> convert at end.
+                s.probeAttempts = (s.probeAttempts || 0) + 1;
+                if (s.probeAttempts > 8) s.live = false;
+                else await tryStartLive(s, endOffset);
+            } else if (s.live && s.ff) await feedStdin(s.ff, buf);
+        }).catch(() => { s.live = false; });
+        s.chain.then(async () => {
+            if (!isFinal) return res.json({ ok: true, next: s.next, live: !!s.announced });
             try { fs.closeSync(s.fd); } catch {}
             uploadSessions.delete(uid);
             if (s.bytes !== s.totalSize) {
+                stopLive(s);
                 fs.unlink(s.tmp, () => {});
                 return res.status(400).json({ error: 'Size mismatch after final chunk' });
             }
+            s.finalized = true;
+            if (s.live && s.ff) {
+                // Finish the stream we have already been playing.
+                announceLive(s); // poller keeps trying until segments exist
+                try { s.ff.stdin.end(); } catch {}
+                fs.unlink(s.tmp, () => {});
+                trackMedia(room, s.mediaId);
+                return res.json({ id: s.mediaId, live: true });
+            }
+            stopLive(s);
+            if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
             return res.json({ id: startProcessing(room, s.tmp, s.name) });
-        }
-        res.json({ ok: true, next: s.next });
+        }).catch((e) => res.status(500).json({ error: 'Upload failed: ' + e.message }));
     });
 });
 
@@ -237,8 +347,10 @@ setInterval(() => {
     const now = Date.now();
     for (const [uid, s] of uploadSessions) {
         if (now - s.last > 30 * 60 * 1000) {
+            stopLive(s);
             try { fs.closeSync(s.fd); } catch {}
             fs.unlink(s.tmp, () => {});
+            if (s.outDir && !s.announced) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
             uploadSessions.delete(uid);
         }
     }
@@ -277,16 +389,47 @@ function handleChatImg(req, res) {
 
 app.delete('/delete/:room', (req, res) => {
     const room = normalizeRoom(req.params.room);
-    const state = room ? roomState.get(room) : null;
-    if (!room || !rooms.has(room) || !state) return res.status(404).json({ error: 'No active video to delete.' });
-    const mediaId = String(state.url || '').split('/')[2];
-    if (/^[a-f0-9]{24}$/.test(mediaId)) {
-        fs.rm(path.join(mediaDir, mediaId), { recursive: true, force: true }, () => {});
+    if (!room || !rooms.has(room)) return res.status(404).json({ error: 'Room not found.' });
+    const ids = new Set(roomMedia.get(room) || []);
+    const state = roomState.get(room);
+    const currentId = String((state && state.url) || '').split('/')[2];
+    if (/^[a-f0-9]{24}$/.test(currentId)) ids.add(currentId);
+
+    // Cancel any upload still running for this room and drop its temp slices.
+    let cancelled = 0;
+    for (const [uid, s] of uploadSessions) {
+        if (s.room !== room) continue;
+        stopLive(s);
+        try { fs.closeSync(s.fd); } catch {}
+        fs.unlink(s.tmp, () => {});
+        if (s.mediaId) ids.add(s.mediaId);
+        if (s.outDir) ids.add(path.basename(s.outDir));
+        uploadSessions.delete(uid);
+        cancelled++;
     }
+
+    if (!ids.size && !state && !cancelled) return res.status(404).json({ error: 'No active video to delete.' });
+
+    // Delete every media folder this room created (current + playlist history).
+    let removed = 0;
+    for (const id of ids) {
+        if (!/^[a-f0-9]{24}$/.test(id)) continue;
+        fs.rm(path.join(mediaDir, id), { recursive: true, force: true }, () => {});
+        removed++;
+    }
+    // Sweep orphaned partial uploads (no live session owns them any more).
+    try {
+        for (const f of fs.readdirSync(uploadsDir)) {
+            if (!f.endsWith('.part')) continue;
+            if (uploadSessions.has(f.slice(0, -5))) continue;
+            fs.unlink(path.join(uploadsDir, f), () => {});
+        }
+    } catch {}
+    roomMedia.delete(room);
     roomState.delete(room);
     io.to(room).emit('player', { type: 'delete' });
-    io.to(room).emit('chat', { name: 'System', text: 'The video has been removed.' });
-    res.json({ ok: true });
+    io.to(room).emit('chat', { name: 'System', text: `Cleared from the room and deleted from the server (${removed} item${removed === 1 ? '' : 's'}).` });
+    res.json({ ok: true, removed, cancelled });
 });
 
 io.on('connection', (s) => {

@@ -779,13 +779,26 @@ sys('Invite link: '+link);
 prompt('Copied! Send this link to your partner:',link);
 };
 
-function loadSource(url){
+function loadSource(url,opts){
+opts=opts||{};
 stopYouTube();
 video.style.display='block';
 if(hls){hls.destroy();hls=null}
 if(url.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
-hls=new Hls();hls.loadSource(url);hls.attachMedia(video);
+// A still-uploading file is a growing EVENT playlist: keep every segment so
+// we can start at 0 (not the live edge) and stay in sync with the partner.
+hls=opts.live?new Hls({liveSyncDurationCount:3,maxBufferLength:30}):new Hls();
+hls.loadSource(url);hls.attachMedia(video);
+if(opts.live){hls.once(Hls.Events.MANIFEST_LOADED,()=>{try{hls.startLoad(0)}catch(_){}});}
 }else video.src=url;
+if(opts.startAt){
+// Both peers receive the same absolute start instant -> simultaneous start.
+const delay=Math.max(0,opts.startAt-Date.now());
+try{video.pause()}catch(_){}
+const begin=()=>{if(!remote)safePlay(video)};
+if(video.readyState>=3)setTimeout(begin,delay);
+else video.addEventListener('canplay',()=>setTimeout(begin,Math.max(0,opts.startAt-Date.now())),{once:true});
+}
 }
 
 // ---- YouTube synced playback ----
@@ -893,7 +906,8 @@ video.addEventListener('waiting',()=>{if(!remote)socket.emit('player',{type:'buf
 video.addEventListener('playing',()=>{if(!remote)socket.emit('player',{type:'ready'})});
 $('syncBtn').onclick=()=>{socket.emit('player',{type:'seek',time:mediaTime()});sys('Synced partner to your position')};
 
-socket.on('player',({type,time,url,subs,kind,videoId})=>{
+socket.on('player',({type,time,url,subs,kind,videoId,live,startAt})=>{
+if(type==='vod'){sys('Upload finished — the full video is now available.');return}
 if(type==='load'){
 if(kind==='youtube'&&videoId){
 showYouTube(videoId,time||0,false);
@@ -903,8 +917,9 @@ return;
 }
 const wasUpload=uploadInProgress;
 const capturedName=($('fileName')&&$('fileName').textContent)||'';
-loadSource(url);addSubs(subs);sys('A video was loaded');
-if(uploadInProgress){uploadInProgress=false;resetUploadUI()}
+loadSource(url,{live,startAt});addSubs(subs);
+sys(live?'Playing while it uploads — you both start together':'A video was loaded');
+if(uploadInProgress&&!live){uploadInProgress=false;resetUploadUI()}
 if(url&&!playlist.some(p=>p.url===url)){
 const clean=capturedName.replace(/\s*\(.*\)$/,'').trim()||('Episode '+(playlist.length+1));
 playlist.push({url,subs,name:clean});

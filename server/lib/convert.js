@@ -64,4 +64,76 @@ async function convert(inputFile, outDir, onProgress) {
     return { duration, hasSubs };
 }
 
-module.exports = { convert };
+// Probe a file that is still being written (progressive upload). Bounded so a
+// partial container can never hang the upload; rejects if there isn't enough
+// data yet (e.g. an MP4 whose 'moov' atom is at the end of the file).
+// Fallback when ffprobe isn't installed: ffmpeg prints the same stream info to
+// stderr. Keeps progressive playback working on minimal ffmpeg installs.
+function probeWithFfmpeg(file, timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+        const p = spawn('ffmpeg', ['-hide_banner', '-i', file]);
+        let err = '';
+        let settled = false;
+        const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(t); try { p.kill('SIGKILL'); } catch {} fn(arg); } };
+        const t = setTimeout(() => done(reject, new Error('probe timeout')), timeoutMs);
+        p.stderr.on('data', (d) => (err += d));
+        p.on('error', (e) => done(reject, e));
+        p.on('close', () => {
+            if (settled) return;
+            const streams = [];
+            const v = err.match(/Stream #\d+:\d+[^\n]*: Video: ([a-zA-Z0-9_]+)/);
+            const a = err.match(/Stream #\d+:\d+[^\n]*: Audio: ([a-zA-Z0-9_]+)/);
+            if (v) streams.push({ codec_type: 'video', codec_name: v[1] });
+            if (a) {
+                const ch = err.match(/Audio:[^\n]*?(\d+) channels/);
+                streams.push({ codec_type: 'audio', codec_name: a[1], channels: ch ? Number(ch[1]) : 2 });
+            }
+            if (!streams.length) return done(reject, new Error('probe failed'));
+            done(resolve, { streams, format: {} });
+        });
+    });
+}
+
+function probePartial(file, timeoutMs = 12000) {
+    return probeWithFfprobe(file, timeoutMs).catch((e) =>
+        (e && e.code === 'ENOENT') ? probeWithFfmpeg(file, timeoutMs) : Promise.reject(e));
+}
+
+function probeWithFfprobe(file, timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+        const p = spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
+            '-analyzeduration', '5M', '-probesize', '5M',
+            '-show_format', '-show_streams', file]);
+        let out = '';
+        let settled = false;
+        const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(t); try { p.kill('SIGKILL'); } catch {} fn(arg); } };
+        const t = setTimeout(() => done(reject, new Error('probe timeout')), timeoutMs);
+        p.stdout.on('data', (d) => (out += d));
+        p.on('error', (e) => done(reject, e));
+        p.on('close', (c) => {
+            if (settled) return;
+            if (c !== 0) return done(reject, new Error('probe failed'));
+            try { done(resolve, JSON.parse(out)); } catch (e) { done(reject, e); }
+        });
+    });
+}
+
+// Feed media on stdin and emit a growing HLS playlist so viewers can watch
+// while the upload is still running. All segments are kept in the playlist
+// (hls_list_size 0 + EVENT) so both peers can start at 0 and stay in sync,
+// and the playlist later becomes a normal VOD once #EXT-X-ENDLIST is appended.
+function startStreamConvert(outDir, { copyV, copyA }) {
+    const args = ['-y', '-i', 'pipe:0',
+        '-map', '0:v:0', '-map', '0:a:0?',
+        ...(copyV ? ['-c:v', 'copy']
+            : ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
+               '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=-2:720']),
+        ...(copyA ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k', '-ac', '2']),
+        '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0',
+        '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments+temp_file',
+        '-hls_segment_filename', path.join(outDir, 'seg_%05d.ts'),
+        path.join(outDir, 'index.m3u8')];
+    return spawn('ffmpeg', args);
+}
+
+module.exports = { convert, probePartial, startStreamConvert };
