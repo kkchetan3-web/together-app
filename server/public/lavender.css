@@ -76,16 +76,20 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #peerName{color:var(--accent-2);font-weight:600}
 
 /* DUAL VIDEO CALL */
-#videoGrid{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(11,8,23,0.35);justify-content:center}
-.camBox{position:relative;flex:1;aspect-ratio:3/4;max-height:140px;background:#0b0817;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:all .3s ease;display:flex;flex-direction:column}
+#videoGrid{display:flex;gap:10px;padding:10px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(11,8,23,0.35);justify-content:center;align-items:stretch}
+.camBox{position:relative;flex:1 1 0;min-width:0;aspect-ratio:16/9;max-height:44dvh;min-height:120px;background:#0b0817;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:all .3s ease;display:flex;flex-direction:column}
 .camBox video{width:100%;height:100%;object-fit:cover}
 .camBox.hidden video{display:none}
-.camBox.hidden::after{content:"Camera Hidden";display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:11px;text-align:center}
-.camControls{position:absolute;bottom:4px;right:4px;display:flex;gap:4px;z-index:2}
-.camControls button{padding:4px 6px;font-size:10px;border-radius:8px;background:rgba(11,8,23,0.75);border:1px solid rgba(196,181,253,0.3);color:#fff}
-.camBox.maximized{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) translateZ(0);isolation:isolate;height:85dvh;width:calc(85dvh * 9 / 16);max-width:95vw;max-height:calc(95vw * 16 / 9);aspect-ratio:9/16 !important;z-index:99999;border:2px solid var(--accent);border-radius:20px;box-shadow:0 0 60px rgba(15,8,40,0.95);flex:none;background:#0b0817}
-.camBox.maximized .camControls{top:10px;bottom:auto;right:10px}
-.camBox.maximized .camControls button{font-size:14px;padding:8px 12px;background:rgba(11,8,23,0.85);border-color:var(--accent)}
+.camBox.hidden::after{content:"Camera Hidden";display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;text-align:center}
+.camLabel{position:absolute;top:6px;left:8px;z-index:2;font-size:11px;font-weight:600;letter-spacing:.3px;color:#fff;background:rgba(11,8,23,0.6);border:1px solid rgba(196,181,253,0.25);padding:3px 8px;border-radius:999px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:none}
+.camControls{position:absolute;bottom:6px;right:6px;display:flex;gap:6px;z-index:2}
+.camControls button{padding:6px 10px;font-size:11px;border-radius:10px;background:rgba(11,8,23,0.75);border:1px solid rgba(196,181,253,0.3);color:#fff}
+/* Maximized = fit-to-screen: whole frame visible, correct aspect, nothing cropped */
+.camBox.maximized{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;min-height:0;aspect-ratio:auto;transform:none;isolation:isolate;z-index:99999;border:none;border-radius:0;box-shadow:none;flex:none;background:#000}
+.camBox.maximized video{object-fit:contain}
+.camBox.maximized .camControls{top:calc(10px + env(safe-area-inset-top,0px));bottom:auto;right:10px}
+.camBox.maximized .camControls button{font-size:15px;padding:10px 16px;background:rgba(11,8,23,0.85);border-color:var(--accent)}
+.camBox.maximized .camLabel{font-size:14px;top:calc(12px + env(safe-area-inset-top,0px));left:12px}
 #maxBackdrop{display:none;position:fixed;inset:0;background:rgba(11,8,23,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99998}
 
 /* MOVIE FULLSCREEN */
