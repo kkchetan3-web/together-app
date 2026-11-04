@@ -47,14 +47,31 @@ app.get('/link', (req, res) => {
 });
 
 app.get('/ice', (req, res) => {
+    const fallback = [{ urls: 'stun:stun.l.google.com:19302' }];
     try {
         const data = fs.readFileSync(path.join(ROOT, 'turn.txt'), 'utf8').trim();
         if (data) {
             const parsed = JSON.parse(data);
-            if (Array.isArray(parsed)) return res.type('json').send(data);
+            if (Array.isArray(parsed)) {
+                const clean = [];
+                for (const e of parsed) {
+                    if (!e || !e.urls) continue;
+                    const entry = {
+                        urls: Array.isArray(e.urls) ? e.urls.map((u) => String(u).trim()) : String(e.urls).trim()
+                    };
+                    // Trim stray whitespace (a trailing space in the credential
+                    // silently breaks TURN authentication).
+                    if (e.username != null) entry.username = String(e.username).trim();
+                    if (e.credential != null) entry.credential = String(e.credential).trim();
+                    const ph = /xxxx|your_metered/i.test(entry.username || '') || /xxx|your_metered/i.test(entry.credential || '');
+                    if (ph) continue; // skip redacted / example placeholders
+                    clean.push(entry);
+                }
+                if (clean.length) return res.json(clean);
+            }
         }
     } catch {}
-    res.json([{ urls: 'stun:stun.l.google.com:19302' }]);
+    res.json(fallback);
 });
 
 const upload = multer({ dest: uploadsDir, limits: { fileSize: 20 * 1024 ** 3 } });
