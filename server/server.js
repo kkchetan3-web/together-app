@@ -10,7 +10,7 @@ const { convert, probePartial, startStreamConvert } = require('./lib/convert');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.3.0-ios-glass';
+const VERSION = '2.4.0-lavender-oneui';
 
 const app = express();
 const server = http.createServer(app);
