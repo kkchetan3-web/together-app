@@ -10,7 +10,7 @@ const { convert, probePartial, startStreamConvert } = require('./lib/convert');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.2.0-ux-batch';
+const VERSION = '2.3.0-ios-glass';
 
 const app = express();
 const server = http.createServer(app);

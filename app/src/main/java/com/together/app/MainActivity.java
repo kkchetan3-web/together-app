@@ -241,29 +241,43 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /* ---------------- Call audio ----------------
-       WebRTC inside a WebView plays through the media stream by default,
-       which causes quiet earpiece audio and echo. The room page calls
-       AndroidSpeaker.setSpeakerOn(true) when a call starts; we then switch
-       the whole device into communication mode, take audio focus, and route
-       to the loudspeaker using the modern API on Android 12+. */
+    /* ---------------- Audio routing ----------------
+       IMPORTANT: we deliberately do NOT use MODE_IN_COMMUNICATION.
+       Switching the device into communication mode routes *all* output
+       through the voice-call path, which dragged the movie's audio onto the
+       earpiece at call volume. This app watches films together, so both the
+       WebRTC call and the movie must stay on the MEDIA stream / loudspeaker.
+       WebRTC's own echo cancellation handles the mic side. */
 
     private void startCallAudio() {
         try {
             if (audioManager == null) return;
-            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            // Stay in normal mode so movie + call both use the media stream.
+            audioManager.setMode(AudioManager.MODE_NORMAL);
             if (focusRequest == null) {
                 AudioAttributes attrs = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
                         .build();
-                focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                         .setAudioAttributes(attrs)
                         .setOnAudioFocusChangeListener(f -> { })
                         .build();
             }
             audioManager.requestAudioFocus(focusRequest);
-            routeSpeaker(true);
+            useMediaSpeaker();
+        } catch (Exception e) { }
+    }
+
+    /* Force output back to the media loudspeaker. Called when a movie starts
+       and from the page's speaker control, so the film never plays through
+       the call earpiece. */
+    private void useMediaSpeaker() {
+        try {
+            if (audioManager == null) return;
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
+            audioManager.setSpeakerphoneOn(false); // no-op in normal mode; media already uses the speaker
         } catch (Exception e) { }
     }
 
@@ -307,7 +321,13 @@ public class MainActivity extends Activity {
         // Keep the original JS API so the existing room page keeps working.
         @JavascriptInterface
         public void setCallSpeaker(final boolean on) {
-            runOnUiThread(() -> routeSpeaker(on));
+            // 'on' means "use the loudspeaker"; muting is handled by the page.
+            runOnUiThread(() -> { if (on) useMediaSpeaker(); });
+        }
+
+        @JavascriptInterface
+        public void useMediaSpeaker() {
+            runOnUiThread(() -> MainActivity.this.useMediaSpeaker());
         }
 
         @JavascriptInterface

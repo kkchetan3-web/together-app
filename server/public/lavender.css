@@ -1,23 +1,38 @@
+/* Mirror of the inline styles in index.html (the live page uses the inline copy).
+   Regenerated whenever the UI changes so both stay identical. */
 :root{
   color-scheme:dark;
-  --bg:#141026;
-  --glass:rgba(167,139,250,0.07);
-  --glass-strong:rgba(167,139,250,0.14);
-  --border:rgba(196,181,253,0.16);
-  --text:#F1EDFC;
-  --text-muted:#A79EC4;
+  /* iOS system palette (dark) with lavender kept as the accent tint */
+  --bg:#0B0B12;
+  --glass:rgba(28,28,32,0.55);          /* thin material   */
+  --glass-strong:rgba(38,38,43,0.72);   /* regular material */
+  --glass-thick:rgba(28,28,30,0.86);    /* thick material   */
+  --border:rgba(255,255,255,0.13);      /* hairline edge    */
+  --separator:rgba(84,84,88,0.55);
+  --fill:rgba(120,120,128,0.28);
+  --fill-hi:rgba(120,120,128,0.40);
+  --fill-lo:rgba(120,120,128,0.16);
+  --seg-track:rgba(120,120,128,0.24);
+  --seg-on:rgba(99,99,102,0.95);
+  --text:#F2F2F7;
+  --text-muted:rgba(235,235,245,0.60);
   --accent:#A78BFA;
   --accent-2:#C4B5FD;
   --brand:#6C5CE7;
-  --danger:#F0506E;
-  --radius-sm:14px;
-  --radius:20px;
-  --radius-lg:28px;
-  --shadow:0 12px 36px rgba(15,8,40,0.5);
-  --shadow-soft:0 4px 24px rgba(15,8,40,0.35);
-  --blur:blur(26px) saturate(1.6);
+  --danger:#FF453A;
+  --radius-sm:12px;
+  --radius:18px;
+  --radius-lg:26px;
+  --radius-xl:34px;
+  --shadow:0 18px 50px rgba(0,0,0,0.55);
+  --shadow-soft:0 8px 26px rgba(0,0,0,0.38);
+  --blur:blur(30px) saturate(180%);
+  /* specular rim: bright top edge + soft bottom shade = real glass depth */
+  --rim:inset 0 .5px 0 rgba(255,255,255,.14),inset 0 -.5px 0 rgba(0,0,0,.30);
+  --rim-hi:inset 0 .5px 0 rgba(255,255,255,.26),inset 0 -.5px 0 rgba(0,0,0,.32);
+  --ease:cubic-bezier(.32,.72,0,1);
   --grad:linear-gradient(135deg,#A78BFA 0%,#7C6AEF 52%,#6C5CE7 100%);
-  --font:'SamsungOne','Samsung Sans','Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --font:-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display','Helvetica Neue','Inter',system-ui,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100dvh;width:100vw;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
@@ -48,6 +63,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #views{flex:1;display:flex;min-height:0;position:relative}
 #views video{width:100%;height:100%;object-fit:contain;background:#0b0817}
 #screen{display:none}
+#ytWrap{position:absolute;inset:0;display:none;background:#000}
+#ytPlayer,#ytWrap iframe{width:100%;height:100%;border:0;display:block}
+#ytUnlock{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;font-size:18px;font-weight:700;cursor:pointer;z-index:5;text-align:center;padding:12px}
 
 /* CONTROL BAR */
 #bar{display:flex;align-items:center;gap:6px;padding:10px 12px;background:rgba(24,18,46,0.88);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border-top:1px solid var(--border);flex-wrap:wrap;flex-shrink:0;position:relative}
@@ -64,6 +82,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 
 /* CALL STATUS */
 .call-status{padding:8px 14px;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(167,139,250,0.06);flex-shrink:0;display:flex;align-items:center;gap:7px;cursor:pointer}
+.diagBody{font-size:12px;line-height:1.6;color:var(--text);background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:10px;white-space:pre-wrap;font-variant-numeric:tabular-nums;max-height:40dvh;overflow-y:auto}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:340px;max-width:94vw;max-height:88dvh;overflow-y:auto;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:16px;z-index:100005;display:flex;flex-direction:column;gap:10px}
+.modal[hidden]{display:none}
 .call-status::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
 .call-status.ok{color:#7EE2A8}.call-status.ok::before{background:#7EE2A8;box-shadow:0 0 8px rgba(126,226,168,.7)}
 .call-status.warn{color:#FFC46B}.call-status.warn::before{background:#FFC46B;box-shadow:0 0 8px rgba(255,196,107,.7)}
@@ -99,6 +120,8 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 .camBox.pip .camLabel{font-size:10px;top:4px;left:6px;padding:2px 6px}
 .camBox.pip.hidden::after{font-size:10px}
 #maxBackdrop{display:none;position:fixed;inset:0;background:rgba(11,8,23,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99998}
+
+
 
 /* QUEUE */
 #queue{display:none;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -141,18 +164,27 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
    Video wells/player stay dark in both themes (standard for video). */
 html[data-theme="light"]{
   color-scheme:light;
-  --bg:#F5F2FC;
-  --glass:rgba(255,255,255,0.6);
-  --glass-strong:rgba(255,255,255,0.82);
-  --border:rgba(108,92,231,0.2);
-  --text:#251C3F;
-  --text-muted:#6E6590;
+  --bg:#F2F2F7;
+  --glass:rgba(255,255,255,0.62);
+  --glass-strong:rgba(255,255,255,0.78);
+  --glass-thick:rgba(255,255,255,0.90);
+  --border:rgba(0,0,0,0.09);
+  --separator:rgba(60,60,67,0.29);
+  --fill:rgba(120,120,128,0.16);
+  --fill-hi:rgba(120,120,128,0.26);
+  --fill-lo:rgba(120,120,128,0.09);
+  --seg-track:rgba(120,120,128,0.16);
+  --seg-on:#FFFFFF;
+  --text:#1C1C1E;
+  --text-muted:rgba(60,60,67,0.60);
   --accent:#7C5CE7;
   --accent-2:#5B4BD6;
   --brand:#6C5CE7;
   --danger:#D63A5C;
-  --shadow:0 12px 36px rgba(108,92,231,0.16);
-  --shadow-soft:0 4px 24px rgba(108,92,231,0.12);
+  --shadow:0 18px 50px rgba(60,50,110,0.18);
+  --shadow-soft:0 8px 26px rgba(60,50,110,0.12);
+  --rim:inset 0 .5px 0 rgba(255,255,255,.85),inset 0 -.5px 0 rgba(0,0,0,.05);
+  --rim-hi:inset 0 .5px 0 rgba(255,255,255,.95),inset 0 -.5px 0 rgba(0,0,0,.06);
 }
 html[data-theme="light"] body{background-image:radial-gradient(circle at 12% 12%,rgba(167,139,250,0.18),transparent 46%),radial-gradient(circle at 88% 88%,rgba(124,106,239,0.14),transparent 46%),radial-gradient(circle at 50% 50%,rgba(196,181,253,0.25),transparent 72%)}
 html[data-theme="light"] #lobby h1{background:linear-gradient(135deg,#3A2E63 25%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -169,14 +201,6 @@ html[data-theme="light"] .lobby-status.ok{color:#1E9E5A}
 html[data-theme="light"] .lobby-status.error{color:#D63A5C}
 html[data-theme="light"] .call-status.ok{color:#1E9E5A}
 html[data-theme="light"] .call-status.warn{color:#B26A00}
-
-/* RESPONSIVE */
-@media (max-width: 900px) or (orientation: portrait){
-#app{grid-template-columns:1fr;grid-template-rows:38dvh 1fr;gap:10px;padding:10px}
-#bar{padding:6px 8px}
-#bar input[type="text"]{min-width:80px}
-#lobby{margin:8vh auto;padding:26px}
-}
 
 /* ---- UX batch (features 3,4,6,8,11,16) ---- */
 #toasts{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:100001;pointer-events:none;width:max-content;max-width:92vw}
@@ -249,6 +273,271 @@ body{--tscale:1}
 #bar button{padding:6px 8px;font-size:11px}
 #lobby{margin:4vh auto;padding:18px}
 }
-.diagBody{font-size:12px;line-height:1.6;color:var(--text);background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:10px;white-space:pre-wrap;font-variant-numeric:tabular-nums;max-height:40dvh;overflow-y:auto}
-.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:340px;max-width:94vw;max-height:88dvh;overflow-y:auto;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:16px;z-index:100005;display:flex;flex-direction:column;gap:10px}
-.modal[hidden]{display:none}
+
+/* RESPONSIVE */
+@media (max-width: 900px) or (orientation: portrait){
+/* minmax(0,..) is essential: a bare `1fr` row has an implicit auto minimum,
+   so the panels above the chat could squeeze #log to zero height and the
+   chat became unscrollable on a phone. */
+#app{grid-template-columns:1fr;grid-template-rows:minmax(0,34dvh) minmax(0,1fr);gap:10px;padding:10px}
+#bar{padding:6px 8px}
+#bar input[type="text"]{min-width:80px}
+#lobby{margin:8vh auto;padding:26px}
+#side{min-height:0;overscroll-behavior:contain}
+#log{min-height:96px;overscroll-behavior:contain;touch-action:pan-y}
+#queue.has{max-height:64px}
+#bookmarks.has{max-height:56px}
+#emojiPanel{max-height:96px}
+#profileCard{padding:8px;gap:4px}
+}
+/* Touch scrolling for the chat on every form factor. */
+#log{-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y}
+#queue.has,#bookmarks.has,#emojiPanel,.diagBody,.modal{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+
+/* ============================================================
+   iOS LIQUID GLASS
+   Layered translucent materials, heavy blur + saturation,
+   hairline separators, specular rims and continuous corners.
+   Lavender is kept as the accent tint; the materials themselves
+   are neutral, which is what makes it read as iOS rather than
+   as a tinted app.
+   ============================================================ */
+
+/* ---- wallpaper: soft iOS-style depth behind the glass ---- */
+body{
+  background-image:
+    radial-gradient(120% 92% at 6% -6%,rgba(167,139,250,.34),transparent 58%),
+    radial-gradient(104% 82% at 102% 8%,rgba(94,92,230,.30),transparent 60%),
+    radial-gradient(126% 104% at 50% 112%,rgba(196,181,253,.22),transparent 62%);
+  background-attachment:fixed;
+}
+html,body{letter-spacing:-.011em;-webkit-text-size-adjust:100%}
+
+/* ---- controls ---- */
+input,button{
+  border:none;background:var(--fill);color:var(--text);
+  font-size:15px;padding:11px 15px;border-radius:var(--radius-sm);
+  box-shadow:var(--rim);
+  transition:transform .22s var(--ease),opacity .18s ease,background .2s ease,box-shadow .2s ease;
+}
+button{border-radius:999px;font-weight:590;letter-spacing:-.01em}
+input:focus{border:none;box-shadow:var(--rim),0 0 0 3.5px rgba(167,139,250,.38)}
+button:hover{background:var(--fill-hi);transform:none}
+button:active{transform:scale(.94);opacity:.72}
+button:disabled{opacity:.35}
+#create,#join,#chatForm button{
+  background:var(--grad);color:#fff;font-weight:600;border:none;
+  box-shadow:0 6px 20px rgba(108,92,231,.42),var(--rim-hi);
+}
+#create:hover,#join:hover,#chatForm button:hover{background:var(--grad);filter:brightness(1.06)}
+#delBtn{background:rgba(255,69,58,.16);color:var(--danger);border:none;box-shadow:var(--rim)}
+#delBtn:hover{background:rgba(255,69,58,.26)}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:3px;border-radius:6px}
+
+/* ---- lobby: a thick-material card ---- */
+#lobby{
+  background:var(--glass-thick);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:.5px solid var(--border);border-radius:var(--radius-xl);
+  box-shadow:var(--shadow),var(--rim-hi);
+  padding:34px 28px;gap:14px;
+}
+#lobby h1{
+  font-size:34px;font-weight:700;letter-spacing:-.028em;
+  background:none;-webkit-text-fill-color:currentColor;color:var(--text);
+}
+#lobby input{border-radius:var(--radius-sm);padding:13px 16px;font-size:16px}
+#create,#join{padding:14px 18px;font-size:16px;border-radius:999px}
+.lobby-status{font-size:13px;letter-spacing:-.01em}
+
+/* ---- stage + floating control bar ---- */
+#stage{
+  border-radius:var(--radius-lg);border:.5px solid var(--border);
+  box-shadow:var(--shadow),var(--rim);background:#000;
+}
+#bar{
+  margin:10px;padding:8px 10px;gap:7px;
+  background:var(--glass-strong);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:.5px solid var(--border);border-top:.5px solid var(--border);
+  border-radius:22px;box-shadow:var(--shadow-soft),var(--rim-hi);
+}
+#bar input[type="text"]{padding:9px 14px;font-size:14px;border-radius:999px;background:var(--fill)}
+#bar button{padding:9px 14px;font-size:13px;border-radius:999px}
+#progWrap{border-radius:999px;overflow:hidden;top:-1px;left:12px;right:12px;height:3px}
+
+/* ---- sidebar: a glass sheet ---- */
+#side{
+  background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:.5px solid var(--border);border-radius:var(--radius-lg);
+  box-shadow:var(--shadow),var(--rim-hi);
+}
+.call-status{
+  background:transparent;border-bottom:.5px solid var(--separator);
+  padding:11px 16px;font-size:13px;font-weight:590;
+}
+#profileCard{background:transparent;border-bottom:.5px solid var(--separator);padding:12px 14px;gap:8px}
+#profileCard input{border-radius:10px;padding:8px 12px;font-size:14px}
+#profileCard button{padding:8px 12px;font-size:13px}
+.nameLabel{font-size:12px;letter-spacing:0}
+
+/* ---- segmented control (iOS) ---- */
+.themeSwitch{
+  background:var(--seg-track);border:none;border-radius:11px;padding:2px;gap:0;
+  backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;
+}
+.themeSwitch button{
+  border-radius:9px;padding:6px 14px;font-size:13px;font-weight:500;
+  background:transparent;box-shadow:none;color:var(--text);
+}
+.themeSwitch button:hover{background:transparent}
+.themeSwitch button.on{
+  background:var(--seg-on);color:var(--text);
+  box-shadow:0 1px 3px rgba(0,0,0,.22),0 3px 8px rgba(0,0,0,.12);
+  font-weight:590;
+}
+#profileCard .themeSwitch button{padding:5px 11px;font-size:12px}
+
+/* ---- call tiles ---- */
+#videoGrid{background:transparent;border-bottom:.5px solid var(--separator);padding:12px;gap:10px}
+.camBox{border-radius:var(--radius);border:.5px solid var(--border);box-shadow:var(--shadow-soft)}
+.camLabel{
+  background:rgba(28,28,30,.55);border:.5px solid rgba(255,255,255,.16);
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  border-radius:999px;padding:4px 10px;font-size:11px;font-weight:590;letter-spacing:0;
+}
+.camControls button{
+  background:rgba(28,28,30,.6);border:.5px solid rgba(255,255,255,.18);border-radius:999px;
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  padding:7px 12px;font-size:12px;
+}
+.camBox.pip{border-radius:18px;border:1.5px solid rgba(255,255,255,.28);box-shadow:0 14px 40px rgba(0,0,0,.6)}
+#maxBackdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+
+/* ---- episodes + bookmarks: iOS inset grouped lists ---- */
+#queue{border-bottom:.5px solid var(--separator)}
+#bookmarks{border-bottom:.5px solid var(--separator)}
+#queue.has,#bookmarks.has{padding:10px 12px}
+#queue .qtitle,#bookmarks .btitle{
+  font-size:11px;font-weight:590;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--text-muted);padding:0 4px 6px;
+}
+#queue .item,#bookmarks .bitem{
+  border-radius:12px;padding:9px 11px;margin-bottom:3px;font-size:14px;
+  background:var(--fill-lo);transition:background .18s ease,transform .18s var(--ease);
+}
+#queue .item:hover,#bookmarks .bitem:hover{background:var(--fill)}
+#queue .item:active,#bookmarks .bitem:active{transform:scale(.985)}
+#queue .item.cur{background:rgba(167,139,250,.22);color:var(--text);font-weight:590}
+#queue .item .n{font-variant-numeric:tabular-nums;font-weight:590}
+#bookmarks .btime{font-weight:590}
+#bookmarks .bdel{border-radius:999px;box-shadow:none;background:transparent}
+
+/* ---- chat: iMessage-style bubbles on the sheet material ---- */
+#log{
+  margin:0;padding:14px 12px;gap:7px;background:transparent;
+  border:none;border-radius:0;
+}
+#log>div{
+  max-width:86%;align-self:flex-start;
+  padding:9px 14px;border:none;border-radius:20px 20px 20px 7px;
+  background:var(--fill);box-shadow:none;
+  font-size:15px;line-height:1.35;letter-spacing:-.01em;
+}
+#log>div.me{
+  align-self:flex-end;border-radius:20px 20px 7px 20px;
+  background:var(--grad);color:#fff;box-shadow:0 2px 10px rgba(108,92,231,.3);
+}
+#log>div.me b{display:none}
+#log>div.me .ts{color:rgba(255,255,255,.72)}
+#log>div.me .reactAdd{color:rgba(255,255,255,.8);border-color:rgba(255,255,255,.35)}
+#log b{font-size:12px;font-weight:590;color:var(--accent-2);display:block;margin-bottom:1px}
+#log .ts{font-size:10px;opacity:.75;font-weight:400}
+#log>div.sys{
+  align-self:center;max-width:100%;background:transparent;border:none;
+  font-style:normal;font-size:12px;color:var(--text-muted);padding:3px 10px;text-align:center;
+}
+#log .chatImg{border-radius:14px;border:none;max-width:220px}
+#log .reactions button{background:var(--fill);border:.5px solid var(--border);box-shadow:none;padding:2px 8px}
+#log .reactions button.mine{background:rgba(167,139,250,.3);border-color:var(--accent)}
+#log .reactAdd{box-shadow:none;font-size:10px;padding:1px 8px;margin-top:5px;opacity:.7}
+#chatHead{border-top:.5px solid var(--separator);padding:9px 16px;font-size:11px;font-weight:590;letter-spacing:.03em}
+#chatToggle{border-radius:999px;padding:3px 10px;box-shadow:none;background:var(--fill-lo)}
+#typing{padding:0 16px 4px;font-size:12px;font-style:normal;opacity:.8}
+#chatForm{
+  background:transparent;border-top:.5px solid var(--separator);
+  padding:10px 12px;gap:8px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+}
+#chatForm input{border-radius:999px;padding:11px 16px;font-size:15px;background:var(--fill)}
+#chatForm button{border-radius:999px;padding:11px 18px}
+.badge{background:var(--danger);font-weight:600;font-size:10px;padding:2px 6px}
+#chatReopen{box-shadow:0 10px 30px rgba(108,92,231,.5),var(--rim-hi);padding:12px 16px}
+#emojiPanel{background:transparent;border-top:.5px solid var(--separator);padding:10px;gap:4px}
+#emojiPanel button{border-radius:12px;box-shadow:none;background:transparent}
+#emojiPanel button:hover{background:var(--fill)}
+
+/* ---- sheets, toasts, overlays ---- */
+.modal,#comfortPanel{
+  background:var(--glass-thick);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:.5px solid var(--border);border-radius:var(--radius-lg);
+  box-shadow:var(--shadow),var(--rim-hi);padding:18px;
+}
+.diagBody{background:var(--fill-lo);border:.5px solid var(--border);border-radius:14px;padding:12px;font-size:12px}
+.toast{
+  background:var(--glass-thick);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:.5px solid var(--border);border-radius:999px;padding:11px 20px;
+  font-size:14px;font-weight:590;box-shadow:var(--shadow-soft),var(--rim-hi);
+  animation:toastIn .34s var(--ease);
+}
+#countOverlay{background:rgba(0,0,0,.6);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%)}
+#countNum{font-weight:700;letter-spacing:-.04em}
+#imgView{background:rgba(0,0,0,.9);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+#imgView img{border-radius:18px}
+#ytUnlock{background:rgba(0,0,0,.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);font-weight:590}
+.cpRow input[type="range"]{accent-color:var(--accent);box-shadow:none;background:transparent}
+
+/* iOS hides scrollbars; content still scrolls. */
+::-webkit-scrollbar{width:0;height:0}
+::-webkit-scrollbar-thumb{background:transparent}
+
+/* ---- light appearance ---- */
+html[data-theme="light"] body{
+  background-image:
+    radial-gradient(120% 92% at 6% -6%,rgba(167,139,250,.30),transparent 58%),
+    radial-gradient(104% 82% at 102% 8%,rgba(94,92,230,.20),transparent 60%),
+    radial-gradient(126% 104% at 50% 112%,rgba(196,181,253,.34),transparent 62%);
+}
+html[data-theme="light"] #bar{background:var(--glass-strong)}
+html[data-theme="light"] #videoGrid,html[data-theme="light"] #profileCard{background:transparent}
+html[data-theme="light"] #log{background:transparent}
+html[data-theme="light"] #log>div{background:var(--fill)}
+html[data-theme="light"] #log>div.me{background:var(--grad);color:#fff}
+html[data-theme="light"] #log>div.sys{background:transparent}
+html[data-theme="light"] #chatForm{background:transparent}
+html[data-theme="light"] button:hover{background:var(--fill-hi)}
+html[data-theme="light"] .themeSwitch button.on{box-shadow:0 1px 3px rgba(0,0,0,.14),0 3px 8px rgba(0,0,0,.06)}
+
+/* ---- compact / phone refinements (kept last so they win) ---- */
+@media (max-width: 900px) or (orientation: portrait){
+  #app{grid-template-columns:1fr;grid-template-rows:minmax(0,34dvh) minmax(0,1fr);gap:10px;padding:10px}
+  #bar{margin:8px;padding:7px 8px;gap:6px;border-radius:20px}
+  #bar button{padding:8px 11px;font-size:12px}
+  #side{border-radius:var(--radius);min-height:0}
+  #log{min-height:96px;padding:12px 10px}
+  #log>div{max-width:90%;font-size:15px}
+  #lobby{margin:7vh auto;padding:28px 22px;border-radius:var(--radius-lg)}
+  #lobby h1{font-size:30px}
+  .modal{
+    left:0;right:0;bottom:0;top:auto;transform:none;width:100%;max-width:100%;
+    border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+    padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px));
+  }
+  .modal::before{
+    content:'';display:block;width:38px;height:5px;border-radius:999px;
+    background:var(--separator);margin:0 auto 12px;flex-shrink:0;
+  }
+  #comfortPanel{border-radius:var(--radius);padding:16px}
+}
+@media (orientation: landscape) and (max-height: 520px){
+  #bar{margin:6px;padding:5px 7px}
+  #bar button{padding:7px 10px;font-size:11px}
+  #lobby{margin:4vh auto;padding:20px}
+}
