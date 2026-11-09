@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v43 : lavender One UI + hardened uploads + single-owner audio routing -->
+<!-- together-ui v44 : movie audio mode (media speaker) + hardened uploads + lavender One UI -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -627,6 +627,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 <button id="comfortBtn" title="Comfort & accessibility">♿</button>
 <button id="copy">🔗 Invite</button>
 <button id="callSpeakerBtn" title="Call audio: Speaker">🔊 Call</button>
+<button id="audioModeBtn" title="Movie audio mode">🎬 Movie audio</button>
 <button class="react">❤️</button>
 <button class="react">😂</button>
 <button class="react">😮</button>
@@ -795,6 +796,10 @@ const cid=sessionStorage.cid||(sessionStorage.cid=Math.random().toString(36).sli
 
 let room,myName='Me',polite=false,pc;
 let localStream=null,screenStream=null,screenSenders=[];
+// Declared before the toolbar wiring below runs (avoids a TDZ error).
+let movieAudioMode=true;
+try{const v=localStorage.getItem('together-audio-mode');if(v!==null)movieAudioMode=(v==='movie')}catch(e){}
+
 let remoteScreenId=null,makingOffer=false,ignoreOffer=false;
 // Accumulate remote tracks into ONE stream (fixes video being overwritten by
 // the audio track when ontrack fires with empty e.streams), and buffer ICE
@@ -866,17 +871,21 @@ if(A.setCallSpeaker){A.setCallSpeaker(true);return true}
 return false;
 }
 function audioStateText(){
+let mode='\n\nMic capture: '+(movieAudioMode?'unprocessed (movie mode → media speaker)':'processed (call mode → may use earpiece)');
+try{const t=localStream&&localStream.getAudioTracks()[0];
+if(t&&t.getSettings){const g=t.getSettings();
+mode+='\nEcho cancel: '+g.echoCancellation+' • NS: '+g.noiseSuppression+' • AGC: '+g.autoGainControl;}}catch(e){}
 try{
 const A=window.AndroidSpeaker;
-if(!A||!A.getAudioState)return '';
+if(!A||!A.getAudioState)return mode;
 const st=JSON.parse(A.getAudioState());
 const dev=st.speakerConfirmed?'loudspeaker (confirmed)':(st.speakerRequested?'loudspeaker (requested, NOT confirmed)':'earpiece / default');
-return '\n\nAudio route: '+dev
+return mode+'\n\nAudio route: '+dev
 +'\nMode: '+(st.mode===3?'in-communication':st.mode===2?'IN CALL (system)':st.mode===0?'normal':st.mode)
 +'\nCall active: '+st.callActive+' • Movie: '+st.movieActive
 +(st.lastError?('\n⚠ '+st.lastError):'')
 +(st.backendNote?('\n'+st.backendNote):'');
-}catch(e){return ''}
+}catch(e){return mode}
 }
 function ensureMovieWebAudio(){
 if(movieAudioCtx){if(movieAudioCtx.state==='suspended')movieAudioCtx.resume().catch(()=>{});return movieAudioCtx}
@@ -903,6 +912,14 @@ if(!native&&on)ensureMovieWebAudio();
 const them=$('them');if(them)them.muted=!on;
 }
 $('callSpeakerBtn').onclick=()=>applyCallSpeaker(!callSpeakerOn);
+$('audioModeBtn').onclick=async()=>{
+movieAudioMode=!movieAudioMode;
+try{localStorage.setItem('together-audio-mode',movieAudioMode?'movie':'call')}catch(e){}
+renderAudioMode();
+await applyAudioMode();
+toast(movieAudioMode?'Movie audio — media speaker':'Call audio — echo cancellation','ok');
+};
+renderAudioMode();
 // Whenever the film starts, ask the wrapper to keep output on the media speaker.
 video.addEventListener('play',()=>{preferMediaSpeaker()});
 video.addEventListener('ended',()=>{try{if(window.AndroidSpeaker&&window.AndroidSpeaker.setMoviePlaying)window.AndroidSpeaker.setMoviePlaying(false)}catch(e){}});
@@ -1117,6 +1134,53 @@ joining=false;setBusy(false);
 }
 }
 
+// ---- Audio path ownership (the earpiece root cause) -----------------------
+// Chromium puts the whole Android device into MODE_IN_COMMUNICATION as soon as
+// a *processed* microphone stream opens (echoCancellation / noiseSuppression /
+// autoGainControl). In that mode the platform routes EVERYTHING -- including
+// the movie -- to the call earpiece at call volume. No amount of AudioManager
+// poking from the wrapper wins that reliably, because Chromium re-applies it.
+//
+// So we stop creating the conflict: in Movie mode we capture the mic WITHOUT
+// audio processing, Chromium never enters call mode, and both the call and the
+// film stay on the media loudspeaker with normal media volume.
+// Trade-off: no echo cancellation, so headphones are recommended. Call mode
+// restores processing if you ever need it.
+function micAudioConstraints(){
+return movieAudioMode
+? {echoCancellation:false,noiseSuppression:false,autoGainControl:false}
+: {echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+}
+function renderAudioMode(){
+const b=$('audioModeBtn');if(!b)return;
+b.textContent=movieAudioMode?'🎬 Movie audio':'📞 Call audio';
+b.title=movieAudioMode
+?'Movie mode: film + call use the media loudspeaker (no echo cancellation — headphones recommended)'
+:'Call mode: echo cancellation on, but Android may route the film to the earpiece';
+b.classList.toggle('on',!movieAudioMode);
+}
+// Re-open the mic with the new processing setting and swap it into the live
+// call. Closing the old processed track is what lets Chromium leave call mode.
+async function applyAudioMode(){
+renderAudioMode();
+if(!localStream||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){return}
+const oldTracks=localStream.getAudioTracks();
+let fresh=null;
+try{fresh=await navigator.mediaDevices.getUserMedia({audio:micAudioConstraints()})}
+catch(e){sys('Could not switch audio mode: mic unavailable.');return}
+const nt=fresh.getAudioTracks()[0];
+if(!nt){fresh.getTracks().forEach(t=>t.stop());return}
+oldTracks.forEach(t=>{try{localStream.removeTrack(t);t.stop()}catch(e){}});
+localStream.addTrack(nt);
+if(pc){
+const sender=pc.getSenders().find(x=>x.track&&x.track.kind==='audio');
+if(sender){try{await sender.replaceTrack(nt)}catch(e){}}
+else{try{pc.addTrack(nt,localStream)}catch(e){}}
+}
+sys(movieAudioMode?'Movie audio: sound goes to the media speaker. Use headphones to avoid echo.'
+:'Call audio: echo cancellation is back on.');
+}
+
 async function ensureLocalMedia(){
 if(localStream){$('me').srcObject=localStream;safePlay($('me'));syncLocalTracks();return}
 if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
@@ -1124,9 +1188,9 @@ sys('Camera/mic is not available in this browser. You can still watch and chat.'
 return;
 }
 try{
-localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:{facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720}}});
+localStream=await navigator.mediaDevices.getUserMedia({audio:micAudioConstraints(),video:{facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720}}});
 }catch(e){
-try{localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}
+try{localStream=await navigator.mediaDevices.getUserMedia({audio:micAudioConstraints()})}
 catch(e2){localStream=null}
 }
 if(localStream){$('me').srcObject=localStream;safePlay($('me'));syncLocalTracks()}
