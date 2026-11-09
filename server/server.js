@@ -10,7 +10,7 @@ const { convert, probePartial, startStreamConvert } = require('./lib/convert');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.4.0-lavender-oneui';
+const VERSION = '2.4.1-upload-hardening';
 
 const app = express();
 const server = http.createServer(app);
@@ -112,6 +112,28 @@ function normalizeCid(value) {
 }
 
 // Every media folder a room creates, so "clear from room" can delete them all.
+// Last-resort safety net. Killing a transcoder when a video is cleared closes
+// its pipes; a late write can still surface EPIPE / write-after-end. Those are
+// expected and must never take the whole room server down. Anything else is a
+// real bug and still crashes loudly so it can be diagnosed.
+const BENIGN_STREAM_ERRORS = new Set(['EPIPE', 'ERR_STREAM_DESTROYED',
+    'ERR_STREAM_WRITE_AFTER_END', 'ERR_STREAM_ALREADY_FINISHED', 'ECANCELED']);
+process.on('uncaughtException', (err) => {
+    if (err && BENIGN_STREAM_ERRORS.has(err.code)) {
+        console.warn('Ignored transient stream error:', err.code);
+        return;
+    }
+    console.error('Fatal error:', err && err.stack || err);
+    process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+    if (err && BENIGN_STREAM_ERRORS.has(err.code)) {
+        console.warn('Ignored transient stream rejection:', err.code);
+        return;
+    }
+    console.error('Unhandled rejection:', err && err.stack || err);
+});
+
 const roomMedia = new Map(); // room -> Set(mediaId)
 function trackMedia(room, id) {
     if (!roomMedia.has(room)) roomMedia.set(room, new Set());
@@ -170,11 +192,26 @@ app.post('/upload/:room', (req, res, next) => {
 // files start together instead of waiting for the whole upload.
 function feedStdin(ff, buf) {
     return new Promise((resolve) => {
-        if (!ff || !ff.stdin || ff.stdin.destroyed) return resolve(false);
-        // Resolving on the write callback gives natural backpressure: if ffmpeg
-        // is slower than the network, slice POSTs slow down instead of buffering
-        // the whole movie in RAM.
-        ff.stdin.write(buf, () => resolve(true));
+        if (!ff || ff.killed || !ff.stdin || ff.stdin.destroyed || ff.stdin.writableEnded) return resolve(false);
+        let done = false, timer = null;
+        const finish = (ok) => {
+            if (done) return;
+            done = true;
+            if (timer) clearTimeout(timer);
+            try { ff.stdin.removeListener('error', onErr); ff.removeListener('close', onClose); } catch {}
+            resolve(ok);
+        };
+        const onErr = () => finish(false);
+        const onClose = () => finish(false);
+        // Backpressure: resolving on the write callback slows slice POSTs to
+        // ffmpeg's pace instead of buffering the movie in RAM. But it must
+        // NEVER hang the upload -- if ffmpeg wedges or dies we resolve false
+        // and the caller falls back to converting after the upload finishes.
+        timer = setTimeout(() => finish(false), 20000);
+        if (timer.unref) timer.unref();
+        ff.stdin.once('error', onErr);
+        ff.once('close', onClose);
+        try { ff.stdin.write(buf, () => finish(true)); } catch { finish(false); }
     });
 }
 
@@ -229,13 +266,30 @@ async function tryStartLive(s, endOffset) {
     s.poller = setInterval(() => announceLive(s), 700);
     s.poller.unref();
     // Feed everything received so far, in order, before later slices.
-    const prefix = fs.readFileSync(s.tmp, { encoding: null, flag: 'r' }).subarray(0, endOffset);
-    await feedStdin(ff, prefix);
+    // Read only the bytes received so far, not the whole temp file: it can
+    // already be larger, and slurping hundreds of MB would OOM a phone.
+    let prefix;
+    try {
+        const rfd = fs.openSync(s.tmp, 'r');
+        try { prefix = Buffer.allocUnsafe(endOffset); fs.readSync(rfd, prefix, 0, endOffset, 0); }
+        finally { fs.closeSync(rfd); }
+    } catch { s.live = false; stopLive(s); return; }
+    if (s.cancelled) { stopLive(s); return; }
+    const ok = await feedStdin(ff, prefix);
+    if (!ok) { s.live = false; stopLive(s); }
 }
 
 function stopLive(s) {
+    s.cancelled = true;
     if (s.poller) { clearInterval(s.poller); s.poller = null; }
-    if (s.ff) { try { s.ff.stdin.end(); } catch {} try { s.ff.kill('SIGKILL'); } catch {} s.ff = null; }
+    const ff = s.ff;
+    s.ff = null;
+    if (!ff) return;
+    // Killing ffmpeg closes the pipe; any pending write then emits EPIPE.
+    // Keep a listener attached or Node kills the whole server process.
+    try { ff.stdin.on('error', () => {}); } catch {}
+    try { ff.stdin.end(); } catch {}
+    try { ff.kill('SIGKILL'); } catch {}
 }
 
 // Chunked upload: small slices pass through Cloudflare's ~100 MB body cap.
@@ -309,15 +363,20 @@ app.post('/upload-chunk/:room', (req, res) => {
         // Serialize progressive-feed work so slices reach ffmpeg in order and
         // the probe's prefix never overlaps a later slice.
         s.chain = (s.chain || Promise.resolve()).then(async () => {
+            if (s.cancelled) return;
             if (s.live === null) {
                 // Keep trying as more of the file arrives (a partial container may
                 // not be readable yet). Give up after 8 attempts -> convert at end.
                 s.probeAttempts = (s.probeAttempts || 0) + 1;
                 if (s.probeAttempts > 8) s.live = false;
                 else await tryStartLive(s, endOffset);
-            } else if (s.live && s.ff) await feedStdin(s.ff, buf);
+            } else if (s.live && s.ff) {
+                const ok = await feedStdin(s.ff, buf);
+                if (!ok) { s.live = false; stopLive(s); } // upload continues; convert at the end
+            }
         }).catch(() => { s.live = false; });
         s.chain.then(async () => {
+            if (s.cancelled) return res.status(409).json({ error: 'Upload was cancelled', next: 0 });
             if (!isFinal) return res.json({ ok: true, next: s.next, live: !!s.announced });
             try { fs.closeSync(s.fd); } catch {}
             uploadSessions.delete(uid);

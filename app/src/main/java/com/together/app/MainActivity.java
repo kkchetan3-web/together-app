@@ -6,9 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
@@ -44,7 +42,11 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermission;
     private AudioManager audioManager;
-    private AudioFocusRequest focusRequest;
+    // Single owner of the output route. Chromium's WebRTC stack inside the
+    // WebView sets the audio mode/device on its own when a call connects, so a
+    // one-shot route change loses the race. This guard re-asserts it.
+    private android.os.Handler audioHandler;
+    private Runnable audioGuard;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -237,75 +239,114 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopCallAudio();
+        stopAudioGuard();
+        callAudio.close();
         if (web != null) web.destroy();
         super.onDestroy();
     }
 
     /* ---------------- Audio routing ----------------
-       IMPORTANT: we deliberately do NOT use MODE_IN_COMMUNICATION.
-       Switching the device into communication mode routes *all* output
-       through the voice-call path, which dragged the movie's audio onto the
-       earpiece at call volume. This app watches films together, so both the
-       WebRTC call and the movie must stay on the MEDIA stream / loudspeaker.
-       WebRTC's own echo cancellation handles the mic side. */
+       ROOT CAUSE of "the movie plays on the call speaker":
+       two owners were fighting over Android's output route -- this wrapper
+       AND Chromium's WebRTC stack inside the WebView. Chromium enters
+       MODE_IN_COMMUNICATION when a processed mic stream opens and picks the
+       EARPIECE; the whole device is then in call mode, so the movie's media
+       stream is dragged onto the earpiece too.
 
-    private void startCallAudio() {
-        try {
-            if (audioManager == null) return;
-            // Stay in normal mode so movie + call both use the media stream.
-            audioManager.setMode(AudioManager.MODE_NORMAL);
-            if (focusRequest == null) {
-                AudioAttributes attrs = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                        .build();
-                focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                        .setAudioAttributes(attrs)
-                        .setOnAudioFocusChangeListener(f -> { })
-                        .build();
-            }
-            audioManager.requestAudioFocus(focusRequest);
-            useMediaSpeaker();
-        } catch (Exception e) { }
-    }
+       CallAudioController is now the SINGLE owner. It never calls setMode()
+       and never requests audio focus (doing either races Chromium). It waits
+       for Chromium's mode, then selects the built-in loudspeaker for
+       communication output, so concurrent media uses that same speaker.
+       A periodic reconcile re-asserts it if Chromium changes the route. */
 
-    /* Force output back to the media loudspeaker. Called when a movie starts
-       and from the page's speaker control, so the film never plays through
-       the call earpiece. */
-    private void useMediaSpeaker() {
-        try {
-            if (audioManager == null) return;
-            audioManager.setMode(AudioManager.MODE_NORMAL);
-            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
-            audioManager.setSpeakerphoneOn(false); // no-op in normal mode; media already uses the speaker
-        } catch (Exception e) { }
-    }
-
-    private void stopCallAudio() {
-        try {
-            if (audioManager == null) return;
-            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
-            audioManager.setSpeakerphoneOn(false);
-            audioManager.setMode(AudioManager.MODE_NORMAL);
-            if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
-        } catch (Exception e) { }
-    }
-
-    private void routeSpeaker(boolean speaker) {
-        try {
-            if (audioManager == null) return;
+    private final CallAudioController callAudio = new CallAudioController(new CallAudioController.Backend() {
+        @Override public int mode() {
+            return audioManager == null ? CallAudioController.MODE_NORMAL : audioManager.getMode();
+        }
+        @Override public boolean selectSpeaker() {
+            if (audioManager == null) return false;
             if (Build.VERSION.SDK_INT >= 31) {
                 AudioDeviceInfo target = null;
                 for (AudioDeviceInfo d : audioManager.getAvailableCommunicationDevices()) {
-                    int t = d.getType();
-                    if (speaker && t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { target = d; break; }
-                    if (!speaker && t == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) { target = d; break; }
+                    if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { target = d; break; }
                 }
-                if (target != null) audioManager.setCommunicationDevice(target);
-            } else {
-                audioManager.setSpeakerphoneOn(speaker);
+                if (target == null) return false;
+                return audioManager.setCommunicationDevice(target);
             }
-        } catch (Exception e) { }
+            audioManager.setSpeakerphoneOn(true);
+            return audioManager.isSpeakerphoneOn();
+        }
+        @Override public boolean speakerSelected() {
+            if (audioManager == null) return false;
+            if (Build.VERSION.SDK_INT >= 31) {
+                AudioDeviceInfo d = audioManager.getCommunicationDevice();
+                return d != null && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+            }
+            return audioManager.isSpeakerphoneOn();
+        }
+        @Override public void clearSpeaker() {
+            if (audioManager == null) return;
+            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
+            else audioManager.setSpeakerphoneOn(false);
+        }
+        @Override public String callDevice() {
+            if (audioManager == null) return "unavailable";
+            if (Build.VERSION.SDK_INT >= 31) {
+                AudioDeviceInfo d = audioManager.getCommunicationDevice();
+                return d == null ? "none" : String.valueOf(d.getType());
+            }
+            return audioManager.isSpeakerphoneOn() ? "speaker" : "earpiece";
+        }
+        @Override public String mediaDevices() {
+            if (audioManager == null) return "unavailable";
+            AudioDeviceInfo[] list = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+            StringBuilder sb = new StringBuilder();
+            for (AudioDeviceInfo d : list) {
+                if (sb.length() > 0) sb.append(',');
+                sb.append(d.getType());
+            }
+            return sb.toString();
+        }
+        @Override public String note() {
+            return Build.VERSION.SDK_INT >= 31 ? "communication-device API" : "legacy speakerphone API";
+        }
+    });
+
+    private void startAudioGuard() {
+        stopAudioGuard();
+        if (audioHandler == null) {
+            audioHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        }
+        audioGuard = new Runnable() {
+            @Override public void run() {
+                callAudio.reconcile("guard");
+                if (audioHandler != null) audioHandler.postDelayed(this, 1200);
+            }
+        };
+        audioHandler.postDelayed(audioGuard, 500);
+    }
+
+    private void stopAudioGuard() {
+        if (audioHandler != null && audioGuard != null) audioHandler.removeCallbacks(audioGuard);
+        audioGuard = null;
+    }
+
+    private void startCallAudio() {
+        callAudio.setSessionState(true, true, false);
+        startAudioGuard();
+    }
+
+    private void stopCallAudio() {
+        stopAudioGuard();
+        callAudio.release();
+    }
+
+    /* The page calls this when the film starts. A movie on its own must NOT
+       create a communication session -- it only refreshes the route if a call
+       is already active. */
+    private void useMediaSpeaker() {
+        callAudio.setMovieActive(true);
+        if (callAudio.isSessionActive()) startAudioGuard();
     }
 
     public class ThemeBridge {
@@ -336,6 +377,16 @@ public class MainActivity extends Activity {
                 if (on) startCallAudio();
                 else stopCallAudio();
             });
+        }
+
+        @JavascriptInterface
+        public void setMoviePlaying(final boolean on) {
+            runOnUiThread(() -> callAudio.setMovieActive(on));
+        }
+
+        @JavascriptInterface
+        public String getAudioState() {
+            return callAudio.stateJson();
         }
     }
 }

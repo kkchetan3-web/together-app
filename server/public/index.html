@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v42 : lavender gradient glass + One UI polish + phone chat scroll + media speaker + deterministic episodes -->
+<!-- together-ui v43 : lavender One UI + hardened uploads + single-owner audio routing -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -854,10 +854,29 @@ if(!room)setLobbyStatus('Cannot reach server. Retrying…','error');
 let movieAudioCtx=null,movieAudioNode=null;
 function preferMediaSpeaker(){
 try{
-if(window.AndroidSpeaker&&window.AndroidSpeaker.useMediaSpeaker){window.AndroidSpeaker.useMediaSpeaker();return true}
-if(window.AndroidSpeaker&&window.AndroidSpeaker.setCallSpeaker){window.AndroidSpeaker.setCallSpeaker(true);return true}
+const A=window.AndroidSpeaker;
+if(!A)return false;
+// Tell the wrapper a movie is playing. It must NOT create a communication
+// session for a movie on its own -- it only refreshes the route if a call is
+// already active, so the film keeps normal media usage and its own volume.
+if(A.setMoviePlaying){try{A.setMoviePlaying(true)}catch(e){}}
+if(A.useMediaSpeaker){A.useMediaSpeaker();return true}
+if(A.setCallSpeaker){A.setCallSpeaker(true);return true}
 }catch(e){}
 return false;
+}
+function audioStateText(){
+try{
+const A=window.AndroidSpeaker;
+if(!A||!A.getAudioState)return '';
+const st=JSON.parse(A.getAudioState());
+const dev=st.speakerConfirmed?'loudspeaker (confirmed)':(st.speakerRequested?'loudspeaker (requested, NOT confirmed)':'earpiece / default');
+return '\n\nAudio route: '+dev
++'\nMode: '+(st.mode===3?'in-communication':st.mode===2?'IN CALL (system)':st.mode===0?'normal':st.mode)
++'\nCall active: '+st.callActive+' • Movie: '+st.movieActive
++(st.lastError?('\n⚠ '+st.lastError):'')
++(st.backendNote?('\n'+st.backendNote):'');
+}catch(e){return ''}
 }
 function ensureMovieWebAudio(){
 if(movieAudioCtx){if(movieAudioCtx.state==='suspended')movieAudioCtx.resume().catch(()=>{});return movieAudioCtx}
@@ -886,6 +905,7 @@ const them=$('them');if(them)them.muted=!on;
 $('callSpeakerBtn').onclick=()=>applyCallSpeaker(!callSpeakerOn);
 // Whenever the film starts, ask the wrapper to keep output on the media speaker.
 video.addEventListener('play',()=>{preferMediaSpeaker()});
+video.addEventListener('ended',()=>{try{if(window.AndroidSpeaker&&window.AndroidSpeaker.setMoviePlaying)window.AndroidSpeaker.setMoviePlaying(false)}catch(e){}});
 
 // INDIVIDUAL CAMERA CONTROLS
 // NOTE: #side has backdrop-filter, which traps position:fixed descendants.
@@ -1803,8 +1823,8 @@ return extra;
 }
 function refreshDiag(){
 if($('callDiag').hidden)return;
-diagText && ($('diagBody').textContent=diagText());
-diagStats().then(x=>{if(!$('callDiag').hidden)$('diagBody').textContent=diagText()+x;});
+diagText && ($('diagBody').textContent=diagText()+audioStateText());
+diagStats().then(x=>{if(!$('callDiag').hidden)$('diagBody').textContent=diagText()+x+audioStateText();});
 }
 $('callStatus').onclick=()=>{
 const d=$('callDiag');

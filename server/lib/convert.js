@@ -3,8 +3,8 @@ const path = require('path');
 
 function probe(file) {
     return new Promise((resolve, reject) => {
-        const p = spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
-            '-show_format', '-show_streams', file]);
+        const p = harden(spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
+            '-show_format', '-show_streams', file]));
         let out = '';
         p.stdout.on('data', (d) => (out += d));
         // A missing/unspawnable binary emits 'error'; without this the whole
@@ -41,14 +41,13 @@ async function convert(inputFile, outDir, onProgress) {
         path.join(outDir, 'index.m3u8')];
 
     await new Promise((resolve, reject) => {
-        const ff = spawn('ffmpeg', args);
-        ff.stdout.on('data', (d) => {
+        const ff = harden(spawn('ffmpeg', args), { onStdout: (d) => {
             const all = [...d.toString().matchAll(/out_time_ms=(\d+)/g)];
             if (all.length && duration) {
                 const t = Number(all[all.length - 1][1]) / 1e6;
                 onProgress(Math.min(99, Math.round((t / duration) * 100)));
             }
-        });
+        } });
         ff.on('error', (e) => reject(new Error(e.code === 'ENOENT'
             ? 'ffmpeg is not installed. In Termux run: pkg install ffmpeg'
             : 'Conversion failed: ' + e.message)));
@@ -56,7 +55,7 @@ async function convert(inputFile, outDir, onProgress) {
     });
 
     const hasSubs = await new Promise((resolve) => {
-        const s = spawn('ffmpeg', ['-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]);
+        const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]));
         s.on('error', () => resolve(false)); // subtitles are optional
         s.on('close', (c) => resolve(c === 0));
     });
@@ -71,7 +70,7 @@ async function convert(inputFile, outDir, onProgress) {
 // stderr. Keeps progressive playback working on minimal ffmpeg installs.
 function probeWithFfmpeg(file, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
-        const p = spawn('ffmpeg', ['-hide_banner', '-i', file]);
+        const p = harden(spawn('ffmpeg', ['-hide_banner', '-i', file]));
         let err = '';
         let settled = false;
         const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(t); try { p.kill('SIGKILL'); } catch {} fn(arg); } };
@@ -101,9 +100,9 @@ function probePartial(file, timeoutMs = 12000) {
 
 function probeWithFfprobe(file, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
-        const p = spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
+        const p = harden(spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
             '-analyzeduration', '5M', '-probesize', '5M',
-            '-show_format', '-show_streams', file]);
+            '-show_format', '-show_streams', file]));
         let out = '';
         let settled = false;
         const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(t); try { p.kill('SIGKILL'); } catch {} fn(arg); } };
@@ -122,6 +121,32 @@ function probeWithFfprobe(file, timeoutMs = 12000) {
 // while the upload is still running. All segments are kept in the playlist
 // (hls_list_size 0 + EVENT) so both peers can start at 0 and stay in sync,
 // and the playlist later becomes a normal VOD once #EXT-X-ENDLIST is appended.
+// Make a spawned ffmpeg safe to run unattended:
+//  * Drain stdout/stderr. If nobody reads them the 64 KB OS pipe buffer fills,
+//    ffmpeg BLOCKS writing diagnostics, stops consuming stdin, and the upload
+//    feeding it stalls forever part-way through.
+//  * Absorb stdin errors. Killing ffmpeg (e.g. the user clears the video)
+//    makes a pending write emit EPIPE; with no 'error' listener Node treats
+//    that as an unhandled error and the whole server process exits.
+function harden(child, { onStdout } = {}) {
+    try {
+        if (child.stdout) {
+            child.stdout.on('data', (d) => { if (onStdout) onStdout(d); });
+            child.stdout.on('error', () => {});
+            child.stdout.resume();
+        }
+        if (child.stderr) {
+            child.stderr.on('data', () => {}); // discard, but keep the pipe flowing
+            child.stderr.on('error', () => {});
+            child.stderr.resume();
+        }
+        if (child.stdin) {
+            child.stdin.on('error', () => {}); // EPIPE on kill is expected, not fatal
+        }
+    } catch {}
+    return child;
+}
+
 function startStreamConvert(outDir, { copyV, copyA }) {
     const args = ['-y', '-i', 'pipe:0',
         '-map', '0:v:0', '-map', '0:a:0?',
@@ -133,7 +158,9 @@ function startStreamConvert(outDir, { copyV, copyA }) {
         '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments+temp_file',
         '-hls_segment_filename', path.join(outDir, 'seg_%05d.ts'),
         path.join(outDir, 'index.m3u8')];
-    return spawn('ffmpeg', args);
+    // -nostats/-loglevel error keep the diagnostic volume tiny; harden() still
+    // drains the pipes so even a pathological file can never wedge the upload.
+    return harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', ...args]));
 }
 
 module.exports = { convert, probePartial, startStreamConvert };
