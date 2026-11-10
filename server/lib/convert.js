@@ -2,6 +2,12 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 function probe(file) {
+    // Some minimal ffmpeg installs ship without ffprobe; fall back to parsing
+    // `ffmpeg -i` (same trick probePartial already uses for live playback).
+    return probeJson(file).catch((e) =>
+        /ffprobe is not installed/.test(e.message) ? probeWithFfmpeg(file) : Promise.reject(e));
+}
+function probeJson(file) {
     return new Promise((resolve, reject) => {
         const p = harden(spawn('ffprobe', ['-v', 'error', '-print_format', 'json',
             '-show_format', '-show_streams', file]));
@@ -19,8 +25,16 @@ function probe(file) {
     });
 }
 
-async function convert(inputFile, outDir, onProgress) {
+// `job` (optional) makes the conversion cancellable mid-flight: the caller may
+// set job.cancelled=true and invoke job.kill() at any moment (that is what
+// "delete while a 500 MB file is still converting" does). Without it the
+// ffmpeg ran to completion no matter what and re-announced the "deleted" file.
+async function convert(inputFile, outDir, onProgress, job) {
+    const isCancelled = () => !!(job && job.cancelled);
+    const bail = () => { const e = new Error('Conversion cancelled'); e.cancelled = true; return e; };
+    if (isCancelled()) throw bail();
     const info = await probe(inputFile);
+    if (isCancelled()) throw bail();
     const v = info.streams.find((s) => s.codec_type === 'video');
     const a = info.streams.find((s) => s.codec_type === 'audio');
     if (!v) throw new Error('No video found in this file');
@@ -48,17 +62,25 @@ async function convert(inputFile, outDir, onProgress) {
                 onProgress(Math.min(99, Math.round((t / duration) * 100)));
             }
         } });
+        if (job) job.kill = () => { try { ff.kill('SIGKILL'); } catch {} };
         ff.on('error', (e) => reject(new Error(e.code === 'ENOENT'
             ? 'ffmpeg is not installed. In Termux run: pkg install ffmpeg'
             : 'Conversion failed: ' + e.message)));
-        ff.on('close', (c) => (c === 0 ? resolve() : reject(new Error('Conversion failed (code ' + c + ')'))));
+        ff.on('close', (c) => {
+            if (job) job.kill = null;
+            if (isCancelled()) return reject(bail()); // killed on purpose: not an error
+            return c === 0 ? resolve() : reject(new Error('Conversion failed (code ' + c + ')'));
+        });
     });
+    if (isCancelled()) throw bail();
 
     const hasSubs = await new Promise((resolve) => {
         const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]));
+        if (job) job.kill = () => { try { s.kill('SIGKILL'); } catch {} };
         s.on('error', () => resolve(false)); // subtitles are optional
-        s.on('close', (c) => resolve(c === 0));
+        s.on('close', (c) => { if (job) job.kill = null; resolve(c === 0); });
     });
+    if (isCancelled()) throw bail();
 
     return { duration, hasSubs };
 }
@@ -80,15 +102,20 @@ function probeWithFfmpeg(file, timeoutMs = 12000) {
         p.on('close', () => {
             if (settled) return;
             const streams = [];
-            const v = err.match(/Stream #\d+:\d+[^\n]*: Video: ([a-zA-Z0-9_]+)/);
+            const v = err.match(/Stream #\d+:\d+[^\n]*: Video: ([a-zA-Z0-9_]+)([^\n]*)/);
             const a = err.match(/Stream #\d+:\d+[^\n]*: Audio: ([a-zA-Z0-9_]+)/);
-            if (v) streams.push({ codec_type: 'video', codec_name: v[1] });
+            if (v) {
+                const pix = (v[2] || '').match(/\b(yuv[a-z0-9]+|nv\d+|rgb[a-z0-9]*|bgr[a-z0-9]*)\b/);
+                streams.push({ codec_type: 'video', codec_name: v[1], pix_fmt: pix ? pix[1] : undefined });
+            }
             if (a) {
                 const ch = err.match(/Audio:[^\n]*?(\d+) channels/);
                 streams.push({ codec_type: 'audio', codec_name: a[1], channels: ch ? Number(ch[1]) : 2 });
             }
             if (!streams.length) return done(reject, new Error('probe failed'));
-            done(resolve, { streams, format: {} });
+            const d = err.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+            const duration = d ? String(Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) : undefined;
+            done(resolve, { streams, format: { duration } });
         });
     });
 }

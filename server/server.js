@@ -10,7 +10,7 @@ const { convert, probePartial, startStreamConvert } = require('./lib/convert');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.5.0-movie-audio';
+const VERSION = '2.5.1-delete-fix';
 
 const app = express();
 const server = http.createServer(app);
@@ -135,6 +135,21 @@ process.on('unhandledRejection', (err) => {
 });
 
 const roomMedia = new Map(); // room -> Set(mediaId)
+// Conversions that outlive their upload session (post-finalize fallback
+// convert, or a live tail still encoding after the last slice). Without this
+// registry, /delete could not reach that ffmpeg: the "deleted" file finished
+// converting minutes later, re-announced itself to the room, kept its 500 MB
+// temp file busy, and blocked the next upload behind it in the queue -- the
+// exact "have to restart the server to clear it" failure.
+const roomJobs = new Map(); // room -> Set({ cancel() })
+function trackJob(room, job) {
+    if (!roomJobs.has(room)) roomJobs.set(room, new Set());
+    roomJobs.get(room).add(job);
+}
+function untrackJob(room, job) {
+    const set = roomJobs.get(room);
+    if (set) { set.delete(job); if (!set.size) roomJobs.delete(room); }
+}
 function trackMedia(room, id) {
     if (!roomMedia.has(room)) roomMedia.set(room, new Set());
     roomMedia.get(room).add(id);
@@ -146,10 +161,17 @@ function startProcessing(room, tmp, name) {
     const outDir = path.join(mediaDir, id);
     fs.mkdirSync(outDir, { recursive: true });
     trackMedia(room, id);
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
     io.to(room).emit('processing', { name, percent: 0 });
     queue = queue
-        .then(() => convert(tmp, outDir, (percent) => io.to(room).emit('processing', { name, percent })))
+        .then(() => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+            return convert(tmp, outDir, (percent) => { if (!job.cancelled) io.to(room).emit('processing', { name, percent }); }, job);
+        })
         .then(({ hasSubs }) => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
             const url = `/media/${id}/index.m3u8`;
             const subs = hasSubs ? `/media/${id}/subs.vtt` : null;
             roomState.set(room, { url, subs });
@@ -157,10 +179,18 @@ function startProcessing(room, tmp, name) {
             io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
         })
         .catch((err) => {
+            if (job.cancelled || err.cancelled) {
+                // Deleted while converting: remove the half-written output
+                // quietly (the ffmpeg has exited by the time we get here, so
+                // nothing recreates the folder) and clear the progress bar.
+                fs.rm(outDir, { recursive: true, force: true }, () => {});
+                io.to(room).emit('processing', { name, percent: -1 });
+                return;
+            }
             io.to(room).emit('chat', { name: 'System', text: 'Problem: ' + err.message });
             io.to(room).emit('processing', { name, percent: -1 });
         })
-        .finally(() => fs.unlink(tmp, () => {}));
+        .finally(() => { untrackJob(room, job); fs.unlink(tmp, () => {}); });
     return id;
 }
 
@@ -216,7 +246,7 @@ function feedStdin(ff, buf) {
 }
 
 function announceLive(s) {
-    if (s.announced || !s.outDir) return;
+    if (s.cancelled || s.announced || !s.outDir) return;
     const playlist = path.join(s.outDir, 'index.m3u8');
     try {
         const txt = fs.readFileSync(playlist, 'utf8');
@@ -250,7 +280,7 @@ async function tryStartLive(s, endOffset) {
     ff.on('error', () => { s.live = false; s.ff = null; });
     ff.on('close', (code) => {
         s.ffExited = true;
-        if (code === 0 && s.outDir) {
+        if (code === 0 && s.outDir && !s.cancelled) {
             // Turn the growing EVENT playlist into a finished VOD.
             const pl = path.join(s.outDir, 'index.m3u8');
             try {
@@ -387,9 +417,21 @@ app.post('/upload-chunk/:room', (req, res) => {
             }
             s.finalized = true;
             if (s.live && s.ff) {
-                // Finish the stream we have already been playing.
+                // Finish the stream we have already been playing. The session
+                // leaves uploadSessions here, but ffmpeg may keep encoding the
+                // tail for a while -- register a job so /delete can still
+                // reach it (otherwise the file came back after deletion).
                 announceLive(s); // poller keeps trying until segments exist
-                try { s.ff.stdin.end(); } catch {}
+                const tail = s.ff;
+                const job = { cancel: () => {
+                    stopLive(s);
+                    const mop = () => { if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {}); };
+                    if (tail && !s.ffExited) tail.once('close', mop); else mop();
+                } };
+                trackJob(room, job);
+                if (s.ffExited) untrackJob(room, job);
+                else tail.once('close', () => untrackJob(room, job));
+                try { tail.stdin.end(); } catch {}
                 fs.unlink(s.tmp, () => {});
                 trackMedia(room, s.mediaId);
                 return res.json({ id: s.mediaId, live: true });
@@ -466,6 +508,12 @@ app.delete('/delete/:room', (req, res) => {
         uploadSessions.delete(uid);
         cancelled++;
     }
+
+    // Cancel conversions that outlived their upload session (post-finalize
+    // fallback convert or a live tail still encoding). This is what used to
+    // require a server restart.
+    for (const job of roomJobs.get(room) || []) { try { job.cancel(); } catch {} cancelled++; }
+    roomJobs.delete(room);
 
     if (!ids.size && !state && !cancelled) return res.status(404).json({ error: 'No active video to delete.' });
 
