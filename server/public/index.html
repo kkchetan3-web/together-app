@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v44 : movie audio mode (media speaker) + hardened uploads + lavender One UI -->
+<!-- together-ui v45 : delete clears everything live (no refresh) + movie audio mode + lavender One UI -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1402,7 +1402,7 @@ if(idx>=0){currentIdx=idx;if(wasUpload)socket.emit('queue',{action:'current',idx
 renderQueue();
 return;
 }
-if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();sys('The video was deleted.');return}
+if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();uploadInProgress=false;resetUploadUI();sys('The video was deleted.');return}
 remote=true;
 if(ytMode&&yt){
 if(type==='buffering'){resumeAfter=!ytPaused();yt.pauseVideo()}
@@ -1539,7 +1539,7 @@ uploadFail(err&&err.message?err.message:'Upload failed.');
 }
 };
 socket.on('processing',({name,percent})=>{
-if(percent<0){uploadInProgress=false;$('upStatus').textContent='Conversion failed';$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;return}
+if(percent<0){uploadInProgress=false;$('upStatus').textContent='Stopped';$('progWrap').style.display='none';$('upBtn').disabled=false;$('pickBtn').disabled=false;return}
 if(percent>=99){$('upStatus').textContent='Finishing...';$('progBar').style.width='100%';return}
 $('progWrap').style.display='block';
 $('progBar').style.width=percent+'%';
