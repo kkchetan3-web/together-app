@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v46 : automatic subtitles (embedded or whisper-generated) + movie audio mode + lavender One UI -->
+<!-- together-ui v47 : real-time English subtitles (any language → English, streamed while generating) -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1341,7 +1341,7 @@ function addSubs(url){
 video.querySelectorAll('track').forEach(t=>t.remove());
 if(!url)return;
 const t=document.createElement('track');
-t.kind='subtitles';t.label='Subtitles';t.src=url;t.default=true;
+t.kind='subtitles';t.label='English';t.srclang='en';t.src=url;t.default=true;
 video.appendChild(t);
 }
 $('loadUrl').onclick=()=>{
@@ -1547,8 +1547,8 @@ uploadFail(err&&err.message?err.message:'Upload failed.');
 };
 socket.on('subs',({state,percent})=>{
 if(uploadInProgress)return; // never fight the upload progress text
-if(state==='progress')$('upStatus').textContent='Generating subtitles… '+percent+'%';
-else if(state==='start')$('upStatus').textContent='Generating subtitles…';
+if(state==='progress')$('upStatus').textContent='Live English subtitles… '+percent+'%';
+else if(state==='start')$('upStatus').textContent='Starting English subtitles…';
 else $('upStatus').textContent='';
 });
 socket.on('processing',({name,percent})=>{

@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs } = require('./lib/sub
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.6.0-auto-subtitles';
+const VERSION = '2.7.0-live-english-subs';
 
 const app = express();
 const server = http.createServer(app);
@@ -160,6 +160,12 @@ function untrackJob(room, job) {
 // starts immediately and the track switches on for both viewers when ready.
 // Jobs are registered in roomJobs, so deleting the video cancels them too.
 let subsQueue = Promise.resolve();
+function hlsDuration(playlistFile) {
+    try {
+        return fs.readFileSync(playlistFile, 'utf8').split('\n')
+            .reduce((t, l) => { const m = l.match(/^#EXTINF:([\d.]+)/); return m ? t + Number(m[1]) : t; }, 0);
+    } catch { return 0; }
+}
 function startSubtitleJob(room, id, name) {
     const outDir = path.join(mediaDir, id);
     const outVtt = path.join(outDir, 'subs.vtt');
@@ -173,21 +179,44 @@ function startSubtitleJob(room, id, name) {
             io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles, and the subtitle generator (whisper.cpp) isn't installed on this server yet.` });
             return;
         }
-        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — generating them in the background. They'll switch on automatically when ready.` });
+        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — live English subtitles are being generated. They'll start appearing on screen in a moment and fill in as the movie is transcribed.` });
         io.to(room).emit('subs', { state: 'start', name });
+        // Real-time mode: whisper hands us each finished line as it works.
+        // We grow subs.vtt on disk and re-announce it every few seconds (with
+        // a cache-busting ?r=) so both phones pick up the new lines while the
+        // movie is playing -- no waiting for the whole transcription.
+        const url = `/media/${id}/index.m3u8`;
+        const subs = `/media/${id}/subs.vtt`;
+        const cues = [];
+        let announcedPartial = false, lastPush = 0, rev = 0;
+        const pushPartial = (force) => {
+            if (job.cancelled || !cues.length) return;
+            const now = Date.now();
+            if (!force && announcedPartial && now - lastPush < 8000) return;
+            lastPush = now;
+            const vtt = 'WEBVTT\n\n' + cues.map((c) => `${c.start} --> ${c.end}\n${c.text}`).join('\n\n') + '\n';
+            try { fs.writeFileSync(outVtt, vtt); } catch { return; }
+            const st = roomState.get(room);
+            if (st && st.url === url) st.subs = subs; // late joiners get them too
+            if (!announcedPartial) {
+                announcedPartial = true;
+                io.to(room).emit('chat', { name: 'System', text: `Live English subtitles for "${name}" are on ✅ (filling in as it transcribes)` });
+            }
+            io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
+        };
         try {
             await generateSubs(playlistFile, outVtt, {
+                duration: hlsDuration(playlistFile),
                 onProgress: (p) => io.to(room).emit('subs', { state: 'progress', percent: p, name }),
+                onSegment: (cue) => { cues.push(cue); pushPartial(false); },
                 job,
             });
             if (job.cancelled) { fs.unlink(outVtt, () => {}); return; }
-            const url = `/media/${id}/index.m3u8`;
-            const subs = `/media/${id}/subs.vtt`;
             const st = roomState.get(room);
-            if (st && st.url === url) st.subs = subs; // late joiners get them too
-            io.to(room).emit('player', { type: 'subs', url: subs, target: url });
+            if (st && st.url === url) st.subs = subs;
+            io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
             io.to(room).emit('subs', { state: 'ready', name });
-            io.to(room).emit('chat', { name: 'System', text: `Subtitles for "${name}" are ready ✅` });
+            io.to(room).emit('chat', { name: 'System', text: `English subtitles for "${name}" are complete ✅` });
         } catch (e) {
             if (!job.cancelled && !e.cancelled) {
                 io.to(room).emit('subs', { state: 'error', name });

@@ -86,10 +86,16 @@ function extractEmbedded(input, outVtt) {
 }
 
 const TS = /\[(\d+):(\d{2}):(\d{2})[.,]\d{3}\s+-->/;
+const SEG = /\[(\d+:\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d+:\d{2}:\d{2}[.,]\d{3})\]\s?(.*)/;
+// whisper prints h:mm:ss,mmm or hh:mm:ss.mmm depending on build -> WebVTT form
+function normTs(t) {
+    const m = t.match(/(\d+):(\d{2}):(\d{2})[.,](\d{3})/);
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}:${m[3]}.${m[4]}` : t.replace(',', '.');
+}
 
 // Generate subtitles for `input` (any video ffmpeg can read, including an HLS
 // playlist) into `outVtt`. Long-running and fully cancellable via `job`.
-async function generateSubs(input, outVtt, { duration = 0, onProgress, job } = {}) {
+async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment, job } = {}) {
     const w = findWhisper();
     if (!w) { const e = new Error('whisper.cpp is not installed'); e.notInstalled = true; throw e; }
     const wav = outVtt + '.audio.wav';
@@ -99,13 +105,24 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, job } = {
         await runChild('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y',
             '-i', input, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], { job });
         if (job && job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
-        // 2) speech -> text. -pp prints "progress = N%"; older builds only
-        //    print per-segment timestamps, so parse both.
+        // 2) speech -> ENGLISH text. -tr is whisper's translate task: Japanese,
+        //    Hindi, anything -> English; English stays English. Disable only
+        //    with TOGETHER_SUBS_TRANSLATE=0 (original-language transcription).
+        //    -pp prints "progress = N%"; each finished line is also printed as
+        //    "[hh:mm:ss.mmm --> hh:mm:ss.mmm]  text", which we stream to the
+        //    caller so subtitles can appear on screen WHILE generation runs.
         const threads = Math.max(2, Math.min(8, os.cpus().length));
+        const translate = process.env.TOGETHER_SUBS_TRANSLATE !== '0';
         await runChild(w.bin, ['-m', w.model, '-f', wav, '-ovtt', '-of', ofBase,
-            '-l', process.env.TOGETHER_SUBS_LANG || 'auto', '-t', String(threads), '-pp'], {
+            '-l', process.env.TOGETHER_SUBS_LANG || 'auto', ...(translate ? ['-tr'] : []),
+            '-t', String(threads), '-pp'], {
             job,
             onLine: (line) => {
+                const seg = line.match(SEG);
+                if (seg && onSegment) {
+                    const text = seg[3].trim();
+                    if (text) onSegment({ start: normTs(seg[1]), end: normTs(seg[2]), text });
+                }
                 if (!onProgress) return;
                 const pm = line.match(/progress\s*=\s*(\d+)%/);
                 if (pm) return onProgress(Math.min(99, Number(pm[1])));
