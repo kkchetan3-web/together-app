@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v47 : real-time English subtitles (any language → English, streamed while generating) -->
+<!-- together-ui v48 : CC on/off + subtitle size buttons; real-time English subtitles -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -628,6 +628,8 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 <button id="copy">🔗 Invite</button>
 <button id="callSpeakerBtn" title="Call audio: Speaker">🔊 Call</button>
 <button id="audioModeBtn" title="Movie audio mode">🎬 Movie audio</button>
+<button id="ccBtn" title="Subtitles on/off">💬 CC</button>
+<button id="ccSizeBtn" title="Subtitle text size">🔠 Aa</button>
 <button class="react">❤️</button>
 <button class="react">😂</button>
 <button class="react">😮</button>
@@ -799,6 +801,31 @@ let localStream=null,screenStream=null,screenSenders=[];
 // Declared before the toolbar wiring below runs (avoids a TDZ error).
 let movieAudioMode=true;
 try{const v=localStorage.getItem('together-audio-mode');if(v!==null)movieAudioMode=(v==='movie')}catch(e){}
+// Subtitle display controls (the TRACK itself is managed by the server).
+let ccOn=true,ccSizeIdx=1;
+const CC_SIZES=[['Small','78%'],['Medium','105%'],['Large','145%'],['Extra large','190%']];
+try{
+if(localStorage.getItem('together-cc')==='0')ccOn=false;
+const i=parseInt(localStorage.getItem('together-cc-size'),10);
+if(i>=0&&i<CC_SIZES.length)ccSizeIdx=i;
+}catch(e){}
+// Style the rendered cues (::cue). font-size here is what the Aa button adjusts.
+function applyCcStyle(){
+let st=document.getElementById('ccStyle');
+if(!st){st=document.createElement('style');st.id='ccStyle';document.head.appendChild(st)}
+st.textContent='video::cue{background:rgba(12,8,24,.72);color:#fff;font-size:'+CC_SIZES[ccSizeIdx][1]+';line-height:1.35;font-family:inherit}';
+}
+// Show/hide every subtitle track. Called again after each addSubs(), because
+// live-generated tracks are re-attached as they grow.
+function applyCc(){
+const b=$('ccBtn');
+if(b){b.classList.toggle('on',ccOn);b.title=ccOn?'Subtitles: on (tap to hide)':'Subtitles: off (tap to show)'}
+try{
+const tts=video.textTracks;
+if(tts)for(let i=0;i<tts.length;i++)tts[i].mode=ccOn?'showing':'hidden';
+}catch(e){}
+applyCcStyle();
+}
 
 let remoteScreenId=null,makingOffer=false,ignoreOffer=false;
 // Accumulate remote tracks into ONE stream (fixes video being overwritten by
@@ -920,6 +947,19 @@ await applyAudioMode();
 toast(movieAudioMode?'Movie audio — media speaker':'Call audio — echo cancellation','ok');
 };
 renderAudioMode();
+$('ccBtn').onclick=()=>{
+ccOn=!ccOn;
+try{localStorage.setItem('together-cc',ccOn?'1':'0')}catch(e){}
+applyCc();
+toast(ccOn?'Subtitles on':'Subtitles off','ok');
+};
+$('ccSizeBtn').onclick=()=>{
+ccSizeIdx=(ccSizeIdx+1)%CC_SIZES.length;
+try{localStorage.setItem('together-cc-size',String(ccSizeIdx))}catch(e){}
+applyCcStyle();
+toast('Subtitle size: '+CC_SIZES[ccSizeIdx][0],'ok');
+};
+applyCc();
 // Whenever the film starts, ask the wrapper to keep output on the media speaker.
 video.addEventListener('play',()=>{preferMediaSpeaker()});
 video.addEventListener('ended',()=>{try{if(window.AndroidSpeaker&&window.AndroidSpeaker.setMoviePlaying)window.AndroidSpeaker.setMoviePlaying(false)}catch(e){}});
@@ -1343,6 +1383,7 @@ if(!url)return;
 const t=document.createElement('track');
 t.kind='subtitles';t.label='English';t.srclang='en';t.src=url;t.default=true;
 video.appendChild(t);
+applyCc(); // respect the CC on/off choice for every (re)attached track
 }
 $('loadUrl').onclick=()=>{
 const url=$('urlIn').value.trim();

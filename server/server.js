@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs } = require('./lib/sub
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.7.0-live-english-subs';
+const VERSION = '2.7.1-subtitle-controls';
 
 const app = express();
 const server = http.createServer(app);
