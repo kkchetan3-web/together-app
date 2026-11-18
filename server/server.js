@@ -6,11 +6,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { convert, probePartial, startStreamConvert } = require('./lib/convert');
+const { subtitlesAvailable, extractEmbedded, generateSubs } = require('./lib/subtitles');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.5.1-delete-fix';
+const VERSION = '2.6.0-auto-subtitles';
 
 const app = express();
 const server = http.createServer(app);
@@ -31,7 +32,8 @@ app.get('/health', (req, res) => {
         rooms: rooms.size,
         uptime: Math.round(process.uptime()),
         turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
-        maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3)
+        maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3),
+        subtitles: subtitlesAvailable() ? 'ready' : 'generator not installed'
     });
 });
 
@@ -150,6 +152,71 @@ function untrackJob(room, job) {
     const set = roomJobs.get(room);
     if (set) { set.delete(job); if (!set.size) roomJobs.delete(room); }
 }
+
+// ---- Automatic subtitles --------------------------------------------------
+// Movies that come with a subtitle track keep it (extracted during
+// conversion / right after a live upload). Anything without one gets
+// subtitles generated locally by whisper.cpp on its own queue, so playback
+// starts immediately and the track switches on for both viewers when ready.
+// Jobs are registered in roomJobs, so deleting the video cancels them too.
+let subsQueue = Promise.resolve();
+function startSubtitleJob(room, id, name) {
+    const outDir = path.join(mediaDir, id);
+    const outVtt = path.join(outDir, 'subs.vtt');
+    const playlistFile = path.join(outDir, 'index.m3u8');
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
+    subsQueue = subsQueue.then(async () => {
+        if (job.cancelled || !fs.existsSync(playlistFile)) return; // deleted meanwhile
+        if (!subtitlesAvailable()) {
+            io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles, and the subtitle generator (whisper.cpp) isn't installed on this server yet.` });
+            return;
+        }
+        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — generating them in the background. They'll switch on automatically when ready.` });
+        io.to(room).emit('subs', { state: 'start', name });
+        try {
+            await generateSubs(playlistFile, outVtt, {
+                onProgress: (p) => io.to(room).emit('subs', { state: 'progress', percent: p, name }),
+                job,
+            });
+            if (job.cancelled) { fs.unlink(outVtt, () => {}); return; }
+            const url = `/media/${id}/index.m3u8`;
+            const subs = `/media/${id}/subs.vtt`;
+            const st = roomState.get(room);
+            if (st && st.url === url) st.subs = subs; // late joiners get them too
+            io.to(room).emit('player', { type: 'subs', url: subs, target: url });
+            io.to(room).emit('subs', { state: 'ready', name });
+            io.to(room).emit('chat', { name: 'System', text: `Subtitles for "${name}" are ready ✅` });
+        } catch (e) {
+            if (!job.cancelled && !e.cancelled) {
+                io.to(room).emit('subs', { state: 'error', name });
+                io.to(room).emit('chat', { name: 'System', text: `Could not generate subtitles for "${name}": ${e.message}` });
+            }
+        }
+    }).catch(() => {}).finally(() => untrackJob(room, job));
+}
+
+// After a live (watch-while-uploading) movie finishes: the original file was
+// kept for this moment -- pull its embedded subtitle track if it has one,
+// otherwise queue generation. Either way the source file is removed after.
+async function finishLiveSubtitles(s) {
+    const outVtt = path.join(s.outDir, 'subs.vtt');
+    const url = `/media/${s.mediaId}/index.m3u8`;
+    try {
+        const found = s.tmp && fs.existsSync(s.tmp) && await extractEmbedded(s.tmp, outVtt);
+        if (found && !s.cancelled) {
+            const subs = `/media/${s.mediaId}/subs.vtt`;
+            const st = roomState.get(s.room);
+            if (st && st.url === url) st.subs = subs;
+            io.to(s.room).emit('player', { type: 'subs', url: subs, target: url });
+            io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" came with subtitles — switched on ✅` });
+        } else if (!s.cancelled) {
+            startSubtitleJob(s.room, s.mediaId, s.name);
+        }
+    } catch {}
+    if (s.tmp) fs.unlink(s.tmp, () => {});
+}
 function trackMedia(room, id) {
     if (!roomMedia.has(room)) roomMedia.set(room, new Set());
     roomMedia.get(room).add(id);
@@ -177,6 +244,7 @@ function startProcessing(room, tmp, name) {
             roomState.set(room, { url, subs });
             io.to(room).emit('player', { type: 'load', url, subs });
             io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
+            if (!hasSubs) startSubtitleJob(room, id, name); // movie came without subtitles -> make them
         })
         .catch((err) => {
             if (job.cancelled || err.cancelled) {
@@ -289,8 +357,11 @@ async function tryStartLive(s, endOffset) {
             } catch {}
             announceLive(s);
             io.to(s.room).emit('player', { type: 'vod', url: `/media/${s.mediaId}/index.m3u8` });
+            if (s.finalized) finishLiveSubtitles(s); // embedded subs or generate
         } else if (!s.finalized) {
             s.live = false; s.ff = null; // fall back to converting the whole file at the end
+        } else if (s.tmp) {
+            fs.unlink(s.tmp, () => {}); // finalized but killed/failed: drop the kept source
         }
     });
     s.poller = setInterval(() => announceLive(s), 700);
@@ -432,7 +503,8 @@ app.post('/upload-chunk/:room', (req, res) => {
                 if (s.ffExited) untrackJob(room, job);
                 else tail.once('close', () => untrackJob(room, job));
                 try { tail.stdin.end(); } catch {}
-                fs.unlink(s.tmp, () => {});
+                // NOTE: s.tmp is kept until ffmpeg closes -- finishLiveSubtitles
+                // checks it for an embedded subtitle track, then removes it.
                 trackMedia(room, s.mediaId);
                 return res.json({ id: s.mediaId, live: true });
             }
