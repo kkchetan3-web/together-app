@@ -571,3 +571,35 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
   #bar button{padding:7px 10px;font-size:11px}
   #lobby{margin:4vh auto;padding:20px}
 }
+
+
+/* ---- PHONE MODE (auto-detected) ------------------------------------------
+   html gets device-phone / device-tablet / device-desktop at boot. Tablets
+   and laptops keep the layout above untouched; everything below applies ONLY
+   to phones, where space is scarce and fingers are big. */
+.phone-only{display:none}
+html.device-phone .phone-only{display:inline-flex;align-items:center;justify-content:center}
+/* Bigger film area; chat keeps the rest. minmax(0,..) stays essential. */
+html.device-phone #app{grid-template-rows:minmax(0,40dvh) minmax(0,1fr);gap:8px;padding:8px}
+/* Toolbar: ONE row, finger-sized, swipes sideways instead of wrapping over
+   the video (the wrap was stealing most of the stage height). */
+html.device-phone #bar{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;gap:6px;padding:8px}
+html.device-phone #bar::-webkit-scrollbar{display:none}
+html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px}
+html.device-phone #bar input[type="text"]{flex:0 0 auto;min-width:150px;min-height:42px}
+/* Big, always-reachable play/pause on the film itself. */
+html.device-phone #pauseFab{position:absolute;right:10px;bottom:10px;z-index:40;width:54px;height:54px;border-radius:50%;font-size:22px;background:rgba(20,14,40,.72);backdrop-filter:blur(12px) saturate(1.6);-webkit-backdrop-filter:blur(12px) saturate(1.6);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
+/* Side panel: compact cameras, name/theme card tucked behind the 👤 button,
+   so the CHAT is always on screen and usable. */
+html.device-phone #profileCard{display:none}
+html.device-phone body.show-profile #profileCard{display:block}
+html.device-phone #videoGrid{padding:6px;gap:6px}
+html.device-phone .camBox{min-height:64px;max-height:16dvh}
+html.device-phone #callStatus{padding:4px 8px;font-size:11px}
+html.device-phone #queue.has{max-height:56px}
+html.device-phone #bookmarks.has{max-height:48px}
+html.device-phone #log{min-height:150px}
+html.device-phone #chatHead{padding-top:6px;padding-bottom:6px}
+html.device-phone #chatForm input{font-size:16px;min-height:44px} /* 16px: no focus auto-zoom */
+html.device-phone #chatForm button{min-width:44px;min-height:44px}
+html.device-phone #emojiPanel{max-height:120px}

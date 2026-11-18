@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v48 : CC on/off + subtitle size buttons; real-time English subtitles -->
+<!-- together-ui v49 : auto phone/tablet/desktop detection + phone layout (chat always usable, big pause) -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -583,6 +583,37 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
   #lobby{margin:4vh auto;padding:20px}
 }
 
+
+/* ---- PHONE MODE (auto-detected) ------------------------------------------
+   html gets device-phone / device-tablet / device-desktop at boot. Tablets
+   and laptops keep the layout above untouched; everything below applies ONLY
+   to phones, where space is scarce and fingers are big. */
+.phone-only{display:none}
+html.device-phone .phone-only{display:inline-flex;align-items:center;justify-content:center}
+/* Bigger film area; chat keeps the rest. minmax(0,..) stays essential. */
+html.device-phone #app{grid-template-rows:minmax(0,40dvh) minmax(0,1fr);gap:8px;padding:8px}
+/* Toolbar: ONE row, finger-sized, swipes sideways instead of wrapping over
+   the video (the wrap was stealing most of the stage height). */
+html.device-phone #bar{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;gap:6px;padding:8px}
+html.device-phone #bar::-webkit-scrollbar{display:none}
+html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px}
+html.device-phone #bar input[type="text"]{flex:0 0 auto;min-width:150px;min-height:42px}
+/* Big, always-reachable play/pause on the film itself. */
+html.device-phone #pauseFab{position:absolute;right:10px;bottom:10px;z-index:40;width:54px;height:54px;border-radius:50%;font-size:22px;background:rgba(20,14,40,.72);backdrop-filter:blur(12px) saturate(1.6);-webkit-backdrop-filter:blur(12px) saturate(1.6);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
+/* Side panel: compact cameras, name/theme card tucked behind the 👤 button,
+   so the CHAT is always on screen and usable. */
+html.device-phone #profileCard{display:none}
+html.device-phone body.show-profile #profileCard{display:block}
+html.device-phone #videoGrid{padding:6px;gap:6px}
+html.device-phone .camBox{min-height:64px;max-height:16dvh}
+html.device-phone #callStatus{padding:4px 8px;font-size:11px}
+html.device-phone #queue.has{max-height:56px}
+html.device-phone #bookmarks.has{max-height:48px}
+html.device-phone #log{min-height:150px}
+html.device-phone #chatHead{padding-top:6px;padding-bottom:6px}
+html.device-phone #chatForm input{font-size:16px;min-height:44px} /* 16px: no focus auto-zoom */
+html.device-phone #chatForm button{min-width:44px;min-height:44px}
+html.device-phone #emojiPanel{max-height:120px}
 </style>
 </head>
 <body>
@@ -605,6 +636,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 <div id="stage">
 <div id="views">
 <video id="player" controls controlsList="nodownload" playsinline></video>
+<button id="pauseFab" class="phone-only" title="Play / Pause" aria-label="Play or pause">▶</button>
 <video id="screen" autoplay playsinline controls></video>
 <div id="ytWrap"><div id="ytPlayer"></div><div id="ytUnlock">▶ Tap to play together</div></div>
 </div>
@@ -672,7 +704,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 
 <div id="queue"></div>
 <div id="bookmarks" aria-label="Shared bookmarks"></div>
-<div id="chatHead"><span>Chat</span><span id="unreadBadge" class="badge" hidden>0</span><button id="chatToggle" title="Hide / show chat" aria-label="Hide or show chat">▾</button></div>
+<div id="chatHead"><span>Chat</span><span id="unreadBadge" class="badge" hidden>0</span><button id="profileBtn" class="phone-only" title="Your name & theme">👤</button><button id="chatToggle" title="Hide / show chat" aria-label="Hide or show chat">▾</button></div>
 <div id="log"></div>
 <div id="typing" aria-live="polite"></div>
 <form id="chatForm">
@@ -720,6 +752,18 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 <script src="/vendor/hls.min.js"></script>
 <script>
 const $=(id)=>document.getElementById(id);
+
+// DEVICE: phone / tablet / desktop, detected before first paint so the right
+// layout applies immediately. Touch + a small screen = phone; touch + a big
+// screen = tablet (keeps the full layout); otherwise desktop/laptop.
+const DEVICE=(()=>{try{
+const coarse=window.matchMedia&&window.matchMedia('(pointer: coarse)').matches;
+const dim=Math.min(screen.width||1e9,screen.height||1e9)||0;
+if(coarse&&dim<600)return 'phone';
+if(coarse)return 'tablet';
+}catch(e){}return 'desktop';})();
+document.documentElement.classList.add('device-'+DEVICE);
+window.__device=DEVICE;
 
 // THEME: dark / light / system, persisted per device; "system" follows the OS live.
 const THEME_KEY='together-theme';
@@ -960,6 +1004,28 @@ applyCcStyle();
 toast('Subtitle size: '+CC_SIZES[ccSizeIdx][0],'ok');
 };
 applyCc();
+// Phone mode: name/theme card lives behind the 👤 button in the chat header.
+$('profileBtn').onclick=()=>document.body.classList.toggle('show-profile');
+// Phone mode: big always-reachable play/pause on the film. Plays and pauses
+// through the normal element events, so the pause syncs to the partner
+// exactly like using the native controls.
+const pauseFab=$('pauseFab');
+function fabIcon(){
+if(!pauseFab)return;
+const playing=(typeof ytMode!=='undefined'&&ytMode&&typeof yt!=='undefined'&&yt)?!ytPaused():!(video.paused||video.ended);
+pauseFab.textContent=playing?'⏸':'▶';
+}
+if(pauseFab){
+pauseFab.onclick=()=>{
+if(typeof ytMode!=='undefined'&&ytMode&&typeof yt!=='undefined'&&yt){if(ytPaused())ytPlay();else yt.pauseVideo();}
+else if(video.paused||video.ended)safePlay(video);
+else video.pause();
+setTimeout(fabIcon,60);
+};
+video.addEventListener('play',fabIcon);
+video.addEventListener('pause',fabIcon);
+video.addEventListener('ended',fabIcon);
+}
 // Whenever the film starts, ask the wrapper to keep output on the media speaker.
 video.addEventListener('play',()=>{preferMediaSpeaker()});
 video.addEventListener('ended',()=>{try{if(window.AndroidSpeaker&&window.AndroidSpeaker.setMoviePlaying)window.AndroidSpeaker.setMoviePlaying(false)}catch(e){}});
