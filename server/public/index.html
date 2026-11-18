@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v49 : auto phone/tablet/desktop detection + phone layout (chat always usable, big pause) -->
+<!-- together-ui v50 : phone redesign (bottom tabs: Chat/Call/More) + subtitles readable without fullscreen -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -587,33 +587,57 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 /* ---- PHONE MODE (auto-detected) ------------------------------------------
    html gets device-phone / device-tablet / device-desktop at boot. Tablets
    and laptops keep the layout above untouched; everything below applies ONLY
-   to phones, where space is scarce and fingers are big. */
+   to phones. Phone UX = app-like: film pinned on top, ONE section at a time
+   below (Chat / Call / More), switched by a bottom tab bar. */
 .phone-only{display:none}
 html.device-phone .phone-only{display:inline-flex;align-items:center;justify-content:center}
-/* Bigger film area; chat keeps the rest. minmax(0,..) stays essential. */
-html.device-phone #app{grid-template-rows:minmax(0,40dvh) minmax(0,1fr);gap:8px;padding:8px}
-/* Toolbar: ONE row, finger-sized, swipes sideways instead of wrapping over
-   the video (the wrap was stealing most of the stage height). */
+/* App frame: film • active section • tab bar */
+html.device-phone #app{grid-template-columns:1fr;grid-template-rows:minmax(0,42dvh) minmax(0,1fr) auto;gap:8px;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
+/* Toolbar: ONE finger-sized row that swipes sideways (wrapping stole the
+   film's height before). */
 html.device-phone #bar{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;gap:6px;padding:8px}
 html.device-phone #bar::-webkit-scrollbar{display:none}
-html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px}
+html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px;border-radius:14px}
 html.device-phone #bar input[type="text"]{flex:0 0 auto;min-width:150px;min-height:42px}
 /* Big, always-reachable play/pause on the film itself. */
 html.device-phone #pauseFab{position:absolute;right:10px;bottom:10px;z-index:40;width:54px;height:54px;border-radius:50%;font-size:22px;background:rgba(20,14,40,.72);backdrop-filter:blur(12px) saturate(1.6);-webkit-backdrop-filter:blur(12px) saturate(1.6);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
-/* Side panel: compact cameras, name/theme card tucked behind the 👤 button,
-   so the CHAT is always on screen and usable. */
-html.device-phone #profileCard{display:none}
-html.device-phone body.show-profile #profileCard{display:block}
-html.device-phone #videoGrid{padding:6px;gap:6px}
-html.device-phone .camBox{min-height:64px;max-height:16dvh}
-html.device-phone #callStatus{padding:4px 8px;font-size:11px}
-html.device-phone #queue.has{max-height:56px}
-html.device-phone #bookmarks.has{max-height:48px}
+/* Bottom tab bar */
+html.device-phone #phoneTabs{display:flex;gap:8px}
+html.device-phone #phoneTabs button{flex:1;min-height:54px;border-radius:18px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);color:var(--text-muted);position:relative}
+html.device-phone #phoneTabs button.active{background:var(--grad);color:#fff;border-color:transparent;box-shadow:var(--shadow)}
+html.device-phone #phoneTabs .tEmoji{font-size:19px;line-height:1}
+html.device-phone #phoneTabs .badge{position:absolute;top:5px;right:16px}
+/* One section at a time. Hidden <video> keeps its stream + audio alive. */
+html.device-phone body:not([data-ptab="call"]) #callStatus,
+html.device-phone body:not([data-ptab="call"]) #videoGrid{display:none}
+html.device-phone body:not([data-ptab="more"]) #queue,
+html.device-phone body:not([data-ptab="more"]) #bookmarks{display:none}
+html.device-phone body:not([data-ptab="chat"]) #chatHead,
+html.device-phone body:not([data-ptab="chat"]) #log,
+html.device-phone body:not([data-ptab="chat"]) #typing,
+html.device-phone body:not([data-ptab="chat"]) #chatForm,
+html.device-phone body:not([data-ptab="chat"]) #emojiPanel{display:none}
+/* CHAT tab: comfortable messaging */
 html.device-phone #log{min-height:150px}
-html.device-phone #chatHead{padding-top:6px;padding-bottom:6px}
-html.device-phone #chatForm input{font-size:16px;min-height:44px} /* 16px: no focus auto-zoom */
-html.device-phone #chatForm button{min-width:44px;min-height:44px}
-html.device-phone #emojiPanel{max-height:120px}
+html.device-phone #chatHead{padding-top:8px;padding-bottom:8px}
+html.device-phone #chatForm input{font-size:16px;min-height:46px} /* 16px: no focus auto-zoom */
+html.device-phone #chatForm button{min-width:46px;min-height:46px}
+html.device-phone #emojiPanel{max-height:132px}
+html.device-phone #log>div{line-height:1.45}
+html.device-phone .msg{max-width:88%}
+/* CALL tab: cameras get the whole section, stacked and big */
+html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:column;padding:10px;gap:10px;border-bottom:none}
+html.device-phone body[data-ptab="call"] .camBox{max-height:34dvh;min-height:140px}
+html.device-phone #callStatus{padding:6px 10px;font-size:12px}
+/* MORE tab: name/theme card + episodes + bookmarks, roomy */
+html.device-phone #profileCard{display:none}
+html.device-phone body[data-ptab="more"] #profileCard{display:block;padding:12px}
+html.device-phone body[data-ptab="more"] #queue.has{max-height:34dvh}
+html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:26dvh}
+html.device-phone #profileCard input,html.device-phone #profileCard button{min-height:42px}
+html.device-phone .themeSwitch button{min-width:46px;min-height:42px}
+/* The old chat hide/collapse chevron is redundant under the tab bar */
+html.device-phone #chatToggle,html.device-phone #chatReopen{display:none !important}
 </style>
 </head>
 <body>
@@ -715,6 +739,13 @@ html.device-phone #emojiPanel{max-height:120px}
 </form>
 <div id="emojiPanel" hidden></div>
 </div>
+
+<!-- PHONE-ONLY bottom tab bar (the app grid's 3rd row on phones) -->
+<nav id="phoneTabs" class="phone-only" role="tablist" aria-label="Sections">
+<button type="button" data-ptab="chat" role="tab"><span class="tEmoji">💬</span>Chat<span id="ptChatBadge" class="badge" hidden>0</span></button>
+<button type="button" data-ptab="call" role="tab"><span class="tEmoji">🎥</span>Call</button>
+<button type="button" data-ptab="more" role="tab"><span class="tEmoji">⚙️</span>More</button>
+</nav>
 </div>
 
 <!-- BACKDROP FOR MAXIMIZED -->
@@ -847,7 +878,15 @@ let movieAudioMode=true;
 try{const v=localStorage.getItem('together-audio-mode');if(v!==null)movieAudioMode=(v==='movie')}catch(e){}
 // Subtitle display controls (the TRACK itself is managed by the server).
 let ccOn=true,ccSizeIdx=1;
-const CC_SIZES=[['Small','78%'],['Medium','105%'],['Large','145%'],['Extra large','190%']];
+// Sized against the SCREEN (vmin), not the video box: Chrome scales ::cue
+// percentages with the VIDEO's height, so on a small inline player the text
+// shrank to ~12px and looked invisible until fullscreen. clamp() keeps the
+// same readable size inline, maximized and fullscreen.
+const CC_SIZES=[
+['Small','clamp(13px, 1.5vmin + 7px, 22px)'],
+['Medium','clamp(16px, 2.1vmin + 9px, 28px)'],
+['Large','clamp(20px, 2.8vmin + 11px, 36px)'],
+['Extra large','clamp(25px, 3.6vmin + 14px, 46px)']];
 try{
 if(localStorage.getItem('together-cc')==='0')ccOn=false;
 const i=parseInt(localStorage.getItem('together-cc-size'),10);
@@ -1004,8 +1043,16 @@ applyCcStyle();
 toast('Subtitle size: '+CC_SIZES[ccSizeIdx][0],'ok');
 };
 applyCc();
-// Phone mode: name/theme card lives behind the 👤 button in the chat header.
-$('profileBtn').onclick=()=>document.body.classList.toggle('show-profile');
+// Phone mode: bottom tab bar — film stays on top, ONE section below.
+function setPhoneTab(t){
+document.body.setAttribute('data-ptab',t);
+document.querySelectorAll('#phoneTabs button').forEach(b=>b.classList.toggle('active',b.dataset.ptab===t));
+if(t==='chat'){try{clearUnread();$('log').scrollTop=1e9}catch(e){}}
+}
+document.querySelectorAll('#phoneTabs button').forEach(b=>{b.onclick=()=>setPhoneTab(b.dataset.ptab)});
+setPhoneTab('chat');
+// 👤 in the chat header jumps to the More tab (name & theme live there now).
+$('profileBtn').onclick=()=>setPhoneTab('more');
 // Phone mode: big always-reachable play/pause on the film. Plays and pauses
 // through the normal element events, so the pause syncs to the partner
 // exactly like using the native controls.
@@ -1687,10 +1734,14 @@ let unread=0;
 const msgId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 function logAtBottom(){const l=$('log');return l.scrollHeight-l.scrollTop-l.clientHeight<40;}
 function maybeAutoScroll(){if(logAtBottom()||!$('log').children.length)$('log').scrollTop=1e9;}
-function chatVisible(){return !document.hidden&&!document.body.classList.contains('chat-hidden');}
+function chatVisible(){
+if(document.hidden||document.body.classList.contains('chat-hidden'))return false;
+if(document.documentElement.classList.contains('device-phone')&&document.body.getAttribute('data-ptab')!=='chat')return false;
+return true;
+}
 function setUnread(n){
 unread=n;
-for(const id of ['unreadBadge','reopenBadge']){const el=$(id);if(el){el.textContent=n>99?'99+':n;el.hidden=n<=0;}}
+for(const id of ['unreadBadge','reopenBadge','ptChatBadge']){const el=$(id);if(el){el.textContent=n>99?'99+':n;el.hidden=n<=0;}}
 }
 function bumpUnread(){if(!chatVisible()||!logAtBottom())setUnread(unread+1);}
 function clearUnread(){setUnread(0);}

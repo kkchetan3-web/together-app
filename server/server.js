@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs } = require('./lib/sub
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.8.0-phone-mode';
+const VERSION = '2.9.0-phone-redesign';
 
 const app = express();
 const server = http.createServer(app);
