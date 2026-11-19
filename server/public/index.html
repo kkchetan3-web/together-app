@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v52 : fullscreen with partner cam overlay (all devices) · native pause only · partner cam first -->
+<!-- together-ui v53 : ⛶ top-right · hideable corner cam (✕/👤) · ⋮ overflow menu · junk-subtitle filter -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -87,6 +87,15 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #bar input[type="text"]{flex:1;min-width:120px;padding:7px 12px;font-size:12px}
 #bar input[type="file"]{display:none}
 #bar button{padding:7px 12px;font-size:12px}
+/* ⋮ menu: secondary controls live here so the toolbar stays small. */
+#moreBtn{font-weight:700}
+#moreBtn.on{background:rgba(167,139,250,.28);border-color:var(--accent)}
+#moreMenu{position:absolute;right:10px;bottom:64px;z-index:80;display:flex;flex-direction:column;gap:6px;padding:10px;width:min(300px,calc(100vw - 24px));max-height:min(60vh,430px);overflow-y:auto;background:rgba(24,18,46,.96);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
+#moreMenu[hidden]{display:none}
+#moreMenu button{padding:10px 12px;font-size:12.5px;text-align:left;width:100%}
+#moreMenu .mmRow{display:flex;gap:6px}
+#moreMenu .mmRow input[type="text"]{flex:1;min-width:0;padding:9px 12px;font-size:12px}
+html[data-theme="light"] #moreMenu{background:rgba(255,255,255,.95)}
 #upStatus{font-size:11px;color:var(--accent-2);padding:0 4px}
 #fileName{font-size:11px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
 #progWrap{position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,0.06);display:none;pointer-events:none;z-index:10}
@@ -594,11 +603,11 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
    render children -- so nothing could float over it. Our ⛶ fullscreens the
    #views CONTAINER instead: the film fills it and the partner's camera
    floats in the corner. Tap the little cam to move it left/right. */
-#fsToggle{position:absolute;right:10px;bottom:10px;z-index:45;width:44px;height:44px;border-radius:50%;font-size:18px;display:flex;align-items:center;justify-content:center;background:rgba(20,14,40,.65);backdrop-filter:blur(10px) saturate(1.5);-webkit-backdrop-filter:blur(10px) saturate(1.5);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
+#fsToggle{position:absolute;right:10px;top:10px;z-index:45;width:44px;height:44px;border-radius:50%;font-size:18px;display:flex;align-items:center;justify-content:center;background:rgba(20,14,40,.65);backdrop-filter:blur(10px) saturate(1.5);-webkit-backdrop-filter:blur(10px) saturate(1.5);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
 #fsCam{display:none}
 #views:fullscreen{background:#000}
 #views:fullscreen #player{width:100%;height:100%;object-fit:contain}
-#views:fullscreen #fsToggle{bottom:max(14px,env(safe-area-inset-bottom,0px))}
+#views:fullscreen #fsToggle{top:max(14px,env(safe-area-inset-top,0px));right:max(14px,env(safe-area-inset-right,0px))}
 #views:fullscreen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
 #views:fullscreen #fsCam.left{right:auto;left:12px}
 #views:-webkit-full-screen{background:#000}
@@ -606,6 +615,13 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 #views:-webkit-full-screen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
 #views:-webkit-full-screen #fsCam.left{right:auto;left:12px}
 #fsCam video{width:100%;height:100%;object-fit:cover}
+/* ✕ hides the floating call; it collapses to a round profile bubble that
+   restores the previous size when tapped. */
+#fsCamHide{position:absolute;top:4px;right:4px;z-index:2;width:26px;height:26px;padding:0;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;background:rgba(0,0,0,.55);color:#fff}
+#fsCamIcon{display:none}
+#fsCam.mini video,#fsCam.mini #fsCamHide{display:none}
+#fsCam.mini #fsCamIcon{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:26px}
+#views:fullscreen #fsCam.mini,#views:-webkit-full-screen #fsCam.mini{width:56px;aspect-ratio:1/1;border-radius:50%;background:rgba(20,14,40,.85);border-color:var(--accent)}
 
 /* ---- PHONE MODE (auto-detected) ------------------------------------------
    html gets device-phone / device-tablet / device-desktop at boot. Tablets
@@ -710,7 +726,7 @@ html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 <div id="views">
 <video id="player" controls controlsList="nodownload nofullscreen" playsinline></video>
 <button id="fsToggle" title="Full screen" aria-label="Full screen">⛶</button>
-<div id="fsCam" title="Tap to move"><video id="fsThem" autoplay playsinline muted></video></div>
+<div id="fsCam" title="Tap to move"><video id="fsThem" autoplay playsinline muted></video><button id="fsCamHide" title="Hide">✕</button><span id="fsCamIcon">👤</span></div>
 <video id="screen" autoplay playsinline controls></video>
 <div id="ytWrap"><div id="ytPlayer"></div><div id="ytUnlock">▶ Tap to play together</div></div>
 </div>
@@ -722,25 +738,27 @@ html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 <button id="upBtn" disabled>⬆ Upload</button>
 <button id="delBtn">🗑 Delete</button>
 <span id="upStatus"></span>
-<input type="text" id="urlIn" placeholder="Video URL (.mp4 / .m3u8 / YouTube)">
-<button id="loadUrl">Load</button>
-<button id="mic">🎤 Mic</button>
 <button id="cam">📷 Cam</button>
+<button id="countBtn" title="Start together after a 3-2-1 countdown">⏱ 3‑2‑1</button>
+<button class="react">❤️</button>
+<button class="react">😂</button>
+<button class="react">😮</button>
+<button class="react">👏</button>
+<button id="moreBtn" title="More options" aria-label="More options">⋮ More</button>
+<div id="progWrap"><div id="progBar"></div></div>
+</div>
+<div id="moreMenu" hidden>
+<div class="mmRow"><input type="text" id="urlIn" placeholder="Video URL (.mp4 / .m3u8 / YouTube)"><button id="loadUrl">Load</button></div>
+<button id="mic">🎤 Mic</button>
 <button id="share">🖥 Share</button>
 <button id="syncBtn">⟲ Sync</button>
-<button id="countBtn" title="Start together after a 3-2-1 countdown">⏱ 3‑2‑1</button>
 <button id="markBtn" title="Bookmark this moment for both of you">🔖 Mark</button>
-<button id="comfortBtn" title="Comfort & accessibility">♿</button>
 <button id="copy">🔗 Invite</button>
 <button id="callSpeakerBtn" title="Call audio: Speaker">🔊 Call</button>
 <button id="audioModeBtn" title="Movie audio mode">🎬 Movie audio</button>
 <button id="ccBtn" title="Subtitles on/off">💬 CC</button>
 <button id="ccSizeBtn" title="Subtitle text size">🔠 Aa</button>
-<button class="react">❤️</button>
-<button class="react">😂</button>
-<button class="react">😮</button>
-<button class="react">👏</button>
-<div id="progWrap"><div id="progBar"></div></div>
+<button id="comfortBtn" title="Comfort & accessibility">♿ Comfort</button>
 </div>
 </div>
 
@@ -1131,7 +1149,27 @@ $('fsToggle').textContent='⛶';
 }
 document.addEventListener('fullscreenchange',syncFsCam);
 document.addEventListener('webkitfullscreenchange',syncFsCam);
-if(fsCamEl)fsCamEl.onclick=()=>fsCamEl.classList.toggle('left');
+if(fsCamEl)fsCamEl.onclick=(e)=>{
+if(fsCamEl.classList.contains('mini')){fsCamEl.classList.remove('mini');return;} // tap the profile bubble -> back to full size
+const t=e.target;
+if(t&&(t.id==='fsCamHide'||(t.closest&&t.closest('#fsCamHide')))){fsCamEl.classList.add('mini');return;} // ✕ -> round profile bubble
+fsCamEl.classList.toggle('left'); // plain tap -> other corner
+};
+// ⋮ menu: everything that is not upload/delete/camera/countdown/reactions.
+const moreBtn=$('moreBtn'),moreMenu=$('moreMenu');
+function closeMore(){moreMenu.hidden=true;moreBtn.classList.remove('on');}
+moreBtn.onclick=(e)=>{
+e.stopPropagation();
+if(!moreMenu.hidden)return closeMore();
+const st=document.getElementById('stage'),bar=document.getElementById('bar');
+moreMenu.style.bottom=Math.max(8,st.clientHeight-bar.offsetTop+8)+'px';
+moreMenu.hidden=false;moreBtn.classList.add('on');
+};
+document.addEventListener('click',(e)=>{
+if(moreMenu.hidden)return;
+if(moreMenu.contains(e.target)||e.target===moreBtn)return;
+closeMore();
+});
 // Whenever the film starts, ask the wrapper to keep output on the media speaker.
 video.addEventListener('play',()=>{preferMediaSpeaker()});
 video.addEventListener('ended',()=>{try{if(window.AndroidSpeaker&&window.AndroidSpeaker.setMoviePlaying)window.AndroidSpeaker.setMoviePlaying(false)}catch(e){}});

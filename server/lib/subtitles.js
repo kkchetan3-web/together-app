@@ -36,14 +36,16 @@ function findWhisper() {
             let files = [];
             try { files = fs.readdirSync(d).filter((f) => /^ggml-.*\.bin$/.test(f)); } catch { continue; }
             if (!files.length) continue;
-            // Better model first when several are installed.
+            // Multilingual first (an "*.en" model cannot understand Hindi /
+            // Korean / Japanese AT ALL), then better model first.
             const rank = (f) => ['large', 'medium', 'small', 'base', 'tiny'].findIndex((p) => f.includes(p));
-            files.sort((a, b) => { const ra = rank(a), rb = rank(b); return (ra < 0 ? 9 : ra) - (rb < 0 ? 9 : rb); });
+            const en = (f) => (/\.en[.-]/.test(f) ? 1 : 0);
+            files.sort((a, b) => (en(a) - en(b)) || ((rank(a) < 0 ? 9 : rank(a)) - (rank(b) < 0 ? 9 : rank(b))));
             model = path.join(d, files[0]);
             break;
         }
     }
-    return model ? { bin, model } : null;
+    return model ? { bin, model, englishOnly: /\.en[.-]/.test(path.basename(model)) } : null;
 }
 const subtitlesAvailable = () => !!findWhisper();
 
@@ -85,6 +87,29 @@ function extractEmbedded(input, outVtt) {
         .catch(() => { fs.unlink(outVtt, () => {}); return false; });
 }
 
+// Placeholder cues whisper emits when it cannot make out the words
+// ("(foreign language)", "[Music]", bare note symbols). They are noise, not
+// subtitles -- drop them from the live stream AND the final file.
+function isJunkCue(text) {
+    const t = (text || '').trim();
+    if (!t) return true;
+    if (/^[\u266a\u266b\s.*_~-]+$/.test(t)) return true;
+    if (/^[\[(][^\])]{0,80}[\])]$/.test(t) &&
+        /foreign|language|music|speak|sing|applaus|laugh|inaudible|unintelligible|silence|audio in/i.test(t)) return true;
+    return false;
+}
+function stripJunkCues(vtt) {
+    const blocks = vtt.replace(/\r/g, '').split(/\n\n+/);
+    const kept = [blocks[0]];
+    for (let i = 1; i < blocks.length; i++) {
+        const lines = blocks[i].split('\n');
+        const ti = lines.findIndex((l) => l.includes('-->'));
+        if (ti < 0) { kept.push(blocks[i]); continue; }
+        if (!isJunkCue(lines.slice(ti + 1).join(' '))) kept.push(blocks[i]);
+    }
+    return kept.join('\n\n').trim() + '\n';
+}
+
 const TS = /\[(\d+):(\d{2}):(\d{2})[.,]\d{3}\s+-->/;
 const SEG = /\[(\d+:\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d+:\d{2}:\d{2}[.,]\d{3})\]\s?(.*)/;
 // whisper prints h:mm:ss,mmm or hh:mm:ss.mmm depending on build -> WebVTT form
@@ -113,20 +138,22 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
         //    caller so subtitles can appear on screen WHILE generation runs.
         const threads = Math.max(2, Math.min(8, os.cpus().length));
         const translate = process.env.TOGETHER_SUBS_TRANSLATE !== '0';
-        // Greedy decoding (-bo 1 -bs 1) is ~2-3x faster than the default
-        // beam search on a phone CPU, at a small accuracy cost. For maximum
-        // accuracy instead of speed, set TOGETHER_SUBS_FAST=0.
+        // Decoding: pure greedy (-bo 1 -bs 1) is fastest but makes the
+        // translate task hallucinate "[foreign language]" placeholders, so
+        // translation keeps a small beam (-bs 2, still ~2x faster than the
+        // default 5). TOGETHER_SUBS_FAST=0 restores full-accuracy decoding.
         const fast = process.env.TOGETHER_SUBS_FAST !== '0';
+        const decode = !fast ? [] : (translate ? ['-bo', '2', '-bs', '2'] : ['-bo', '1', '-bs', '1']);
         await runChild(w.bin, ['-m', w.model, '-f', wav, '-ovtt', '-of', ofBase,
             '-l', process.env.TOGETHER_SUBS_LANG || 'auto', ...(translate ? ['-tr'] : []),
-            ...(fast ? ['-bo', '1', '-bs', '1'] : []),
+            ...decode,
             '-t', String(threads), '-pp'], {
             job,
             onLine: (line) => {
                 const seg = line.match(SEG);
                 if (seg && onSegment) {
                     const text = seg[3].trim();
-                    if (text) onSegment({ start: normTs(seg[1]), end: normTs(seg[2]), text });
+                    if (text && !isJunkCue(text)) onSegment({ start: normTs(seg[1]), end: normTs(seg[2]), text });
                 }
                 if (!onProgress) return;
                 const pm = line.match(/progress\s*=\s*(\d+)%/);
@@ -141,6 +168,11 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
         let ok = false;
         try { ok = fs.statSync(outVtt).size > 10; } catch {}
         if (!ok) throw new Error('whisper produced no subtitles');
+        let clean = null;
+        try { clean = stripJunkCues(fs.readFileSync(outVtt, 'utf8')); fs.writeFileSync(outVtt, clean); } catch {}
+        if (clean !== null && !clean.includes('-->')) {
+            throw new Error('only "[foreign language]" placeholders were produced -- this whisper model cannot understand the audio; install a multilingual model (e.g. ggml-small.bin)');
+        }
         return true;
     } catch (e) {
         fs.unlink(outVtt, () => {}); // never leave a half-written track behind
@@ -150,4 +182,4 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
     }
 }
 
-module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, generateSubs };
+module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, generateSubs, isJunkCue, stripJunkCues };
