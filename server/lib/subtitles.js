@@ -113,8 +113,13 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
         //    caller so subtitles can appear on screen WHILE generation runs.
         const threads = Math.max(2, Math.min(8, os.cpus().length));
         const translate = process.env.TOGETHER_SUBS_TRANSLATE !== '0';
+        // Greedy decoding (-bo 1 -bs 1) is ~2-3x faster than the default
+        // beam search on a phone CPU, at a small accuracy cost. For maximum
+        // accuracy instead of speed, set TOGETHER_SUBS_FAST=0.
+        const fast = process.env.TOGETHER_SUBS_FAST !== '0';
         await runChild(w.bin, ['-m', w.model, '-f', wav, '-ovtt', '-of', ofBase,
             '-l', process.env.TOGETHER_SUBS_LANG || 'auto', ...(translate ? ['-tr'] : []),
+            ...(fast ? ['-bo', '1', '-bs', '1'] : []),
             '-t', String(threads), '-pp'], {
             job,
             onLine: (line) => {

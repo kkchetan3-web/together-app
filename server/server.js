@@ -6,12 +6,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { convert, probePartial, startStreamConvert } = require('./lib/convert');
-const { subtitlesAvailable, extractEmbedded, generateSubs } = require('./lib/subtitles');
+const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = require('./lib/subtitles');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.9.1-phone-landscape';
+const VERSION = '2.10.0-fullscreen-pip';
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +33,7 @@ app.get('/health', (req, res) => {
         uptime: Math.round(process.uptime()),
         turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
         maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3),
-        subtitles: subtitlesAvailable() ? 'ready' : 'generator not installed'
+        subtitles: (() => { const w = findWhisper(); return w ? `ready (${path.basename(w.model)})` : 'generator not installed'; })()
     });
 });
 

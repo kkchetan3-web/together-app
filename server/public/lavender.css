@@ -1,5 +1,3 @@
-/* Mirror of the inline styles in index.html (the live page uses the inline copy).
-   Regenerated whenever the UI changes so both stay identical. */
 :root{
   color-scheme:dark;
   /* Lavender glass — original palette, higher fidelity */
@@ -103,6 +101,8 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 
 /* DUAL VIDEO CALL */
 #videoGrid{display:flex;gap:10px;padding:10px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(11,8,23,0.35);justify-content:center;align-items:stretch}
+/* Partner first: left on desktops/landscape, top when stacked. */
+#boxThem{order:-1}
 .camBox{position:relative;flex:1 1 0;min-width:0;aspect-ratio:16/9;max-height:44dvh;min-height:120px;background:#0b0817;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:all .3s ease;display:flex;flex-direction:column}
 .camBox video{width:100%;height:100%;object-fit:cover}
 .camBox.hidden video{display:none}
@@ -576,6 +576,24 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
 }
 
 
+/* ---- FULLSCREEN with the partner visible (ALL devices) -------------------
+   The native fullscreen control fullscreens the bare <video>, which cannot
+   render children -- so nothing could float over it. Our ⛶ fullscreens the
+   #views CONTAINER instead: the film fills it and the partner's camera
+   floats in the corner. Tap the little cam to move it left/right. */
+#fsToggle{position:absolute;right:10px;bottom:10px;z-index:45;width:44px;height:44px;border-radius:50%;font-size:18px;display:flex;align-items:center;justify-content:center;background:rgba(20,14,40,.65);backdrop-filter:blur(10px) saturate(1.5);-webkit-backdrop-filter:blur(10px) saturate(1.5);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
+#fsCam{display:none}
+#views:fullscreen{background:#000}
+#views:fullscreen #player{width:100%;height:100%;object-fit:contain}
+#views:fullscreen #fsToggle{bottom:max(14px,env(safe-area-inset-bottom,0px))}
+#views:fullscreen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
+#views:fullscreen #fsCam.left{right:auto;left:12px}
+#views:-webkit-full-screen{background:#000}
+#views:-webkit-full-screen #player{width:100%;height:100%;object-fit:contain}
+#views:-webkit-full-screen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
+#views:-webkit-full-screen #fsCam.left{right:auto;left:12px}
+#fsCam video{width:100%;height:100%;object-fit:cover}
+
 /* ---- PHONE MODE (auto-detected) ------------------------------------------
    html gets device-phone / device-tablet / device-desktop at boot. Tablets
    and laptops keep the layout above untouched; everything below applies ONLY
@@ -591,8 +609,6 @@ html.device-phone #bar{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scroll
 html.device-phone #bar::-webkit-scrollbar{display:none}
 html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px;border-radius:14px}
 html.device-phone #bar input[type="text"]{flex:0 0 auto;min-width:150px;min-height:42px}
-/* Big, always-reachable play/pause on the film itself. */
-html.device-phone #pauseFab{position:absolute;right:10px;bottom:10px;z-index:40;width:54px;height:54px;border-radius:50%;font-size:22px;background:rgba(20,14,40,.72);backdrop-filter:blur(12px) saturate(1.6);-webkit-backdrop-filter:blur(12px) saturate(1.6);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
 /* Bottom tab bar */
 html.device-phone #phoneTabs{display:flex;gap:8px}
 html.device-phone #phoneTabs button{flex:1;min-height:54px;border-radius:18px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);color:var(--text-muted);position:relative}
@@ -621,7 +637,7 @@ html.device-phone .msg{max-width:88%}
    drives height via aspect-ratio, no max-height squeeze. The grid scrolls
    if the two cams don't fit. */
 html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:column;padding:10px;gap:10px;border-bottom:none;overflow-y:auto;min-height:0}
-html.device-phone body[data-ptab="call"] .camBox{width:100%;aspect-ratio:16/9;max-height:none;min-height:0;flex:0 0 auto}
+html.device-phone body[data-ptab="call"] .camBox{width:min(100%,37dvh);align-self:center;aspect-ratio:16/9;max-height:none;min-height:0;flex:0 0 auto}
 html.device-phone #callStatus{padding:6px 10px;font-size:12px}
 /* MORE tab: name/theme card + episodes + bookmarks, roomy */
 html.device-phone #profileCard{display:none}
@@ -648,7 +664,6 @@ html.device-phone #phoneTabs .badge{top:4px;right:8px}
 html.device-phone #bar{padding:5px 6px;gap:5px}
 html.device-phone #bar button{min-height:38px;padding:7px 10px;font-size:11.5px}
 html.device-phone #bar input[type="text"]{min-height:38px;min-width:130px}
-html.device-phone #pauseFab{width:46px;height:46px;font-size:19px;right:8px;bottom:8px}
 html.device-phone #log{min-height:80px}
 html.device-phone #chatForm input{min-height:42px}
 html.device-phone #chatForm button{min-width:42px;min-height:42px}
