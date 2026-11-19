@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+/* Dependency-free TURN connectivity + credential tester (verbose).
+ * Performs a real TURN Allocate (RFC 5766 long-term credential) over UDP/TCP/TLS.
+ * IMPORTANT: the 401 challenge and the authenticated Allocate are sent over the
+ * SAME socket / connection (same 5-tuple), as a real TURN client does.
+ * Usage:
+ *   node turn-check.js                  # reads ./turn.txt
+ *   node turn-check.js /path/turn.txt
+ *   TURN_USER=u TURN_PASS=p node turn-check.js      # test metered defaults
+ *   node turn-check.js --openrelay      # quota-free public relay (REST minted)
+ *   node turn-check.js --control        # legacy public openrelay (network control)
+ * Exit 0 if at least one TURN URL allocated, else 1.
+ */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const dgram = require('dgram');
+const net = require('net');
+const tls = require('tls');
+const dns = require('dns').promises;
+
+const MAGIC = 0x2112a442;
+const TIMEOUT = 6000;
+
+const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+})();
+function crc32(buf) { let c = 0xffffffff; for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+
+function attr(type, value) {
+    const pad = (4 - (value.length % 4)) % 4;
+    const b = Buffer.alloc(4 + value.length + pad);
+    b.writeUInt16BE(type, 0); b.writeUInt16BE(value.length, 2); value.copy(b, 4);
+    return b;
+}
+function header(type, bodyLen, txn) {
+    const h = Buffer.alloc(20);
+    h.writeUInt16BE(type, 0); h.writeUInt16BE(bodyLen, 2); h.writeUInt32BE(MAGIC, 4); txn.copy(h, 8);
+    return h;
+}
+function parseAttrs(msg) {
+    const out = {}; let off = 20;
+    while (off + 4 <= msg.length) {
+        const t = msg.readUInt16BE(off), l = msg.readUInt16BE(off + 2);
+        out[t] = msg.slice(off + 4, off + 4 + l);
+        off += 4 + l + ((4 - (l % 4)) % 4);
+    }
+    return out;
+}
+function xorAddr(buf) {
+    if (!buf || buf.length < 8) return null;
+    const fam = buf[1];
+    const xport = buf.readUInt16BE(2) ^ (MAGIC >>> 16);
+    if (fam === 0x01) return [0, 1, 2, 3].map((i) => buf[4 + i] ^ ((MAGIC >>> (24 - i * 8)) & 0xff)).join('.') + ':' + xport;
+    return '(ipv6 relay)';
+}
+function buildAllocate(txn) {
+    const rt = Buffer.alloc(4); rt[0] = 17;
+    const body = attr(0x0019, rt);
+    return Buffer.concat([header(0x0003, body.length, txn), body]);
+}
+function buildAuthAllocate(txn, user, realm, nonce, pass) {
+    const rt = Buffer.alloc(4); rt[0] = 17;
+    const body = Buffer.concat([
+        attr(0x0006, Buffer.from(user, 'utf8')),
+        attr(0x0014, realm),
+        attr(0x0015, nonce),
+        attr(0x0019, rt)
+    ]);
+    // RFC 5389 15.4: HMAC input = header + preceding attrs (NOT the MI attr header),
+    // with the header length field pointing to the END of the MI attribute.
+    const miLen = body.length + 24;
+    const msgForMI = Buffer.concat([header(0x0003, miLen, txn), body]);
+    const key = crypto.createHash('md5').update(user + ':' + realm.toString('utf8') + ':' + pass).digest();
+    const hmac = crypto.createHmac('sha1', key).update(msgForMI).digest();
+    const msgWithMI = Buffer.concat([msgForMI, attr(0x0008, hmac)]);
+    // RFC 5389 15.5: CRC input = everything up to (NOT including) the FINGERPRINT
+    // attribute, with the header length field including the FINGERPRINT attribute.
+    msgWithMI.writeUInt16BE(miLen + 8, 2);
+    const fp = (crc32(msgWithMI) ^ 0x5354554e) >>> 0;
+    const fpVal = Buffer.alloc(4); fpVal.writeUInt32BE(fp, 0);
+    return Buffer.concat([msgWithMI, attr(0x8028, fpVal)]);
+}
+function errCode(a) {
+    if (!a[0x0009] || a[0x0009].length < 4) return { code: 0, reason: '' };
+    return { code: a[0x0009][2] * 100 + a[0x0009][3], reason: a[0x0009].slice(4).toString('utf8') };
+}
+
+// ---- persistent channels (same 5-tuple for challenge + auth) ----
+function udpChannel(host, port) {
+    const sock = dgram.createSocket('udp4');
+    let pending = null;
+    sock.on('message', (m) => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(m); } });
+    sock.on('error', () => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(null); } });
+    return {
+        ready: Promise.resolve(),
+        request(msg) {
+            return new Promise((res) => {
+                pending = { res, t: setTimeout(() => { pending = null; res(null); }, TIMEOUT) };
+                sock.send(msg, port, host, (e) => { if (e && pending) { clearTimeout(pending.t); pending = null; res(null); } });
+            });
+        },
+        close() { try { sock.close(); } catch {} }
+    };
+}
+function tcpChannel(host, port, useTls) {
+    let buf = Buffer.alloc(0); let pending = null;
+    const sock = useTls ? tls.connect({ host, port, servername: host, rejectUnauthorized: false }) : net.connect({ host, port });
+    const fail = () => { if (pending) { const p = pending; pending = null; clearTimeout(p.t); p.res(null); } };
+    sock.on('data', (d) => {
+        buf = Buffer.concat([buf, d]);
+        if (pending && buf.length >= 20) {
+            const len = buf.readUInt16BE(2);
+            if (buf.length >= 20 + len) { const m = buf.slice(0, 20 + len); buf = buf.slice(20 + len); const p = pending; pending = null; clearTimeout(p.t); p.res(m); }
+        }
+    });
+    sock.on('error', fail); sock.on('close', fail);
+    const ready = new Promise((res) => { sock.on(useTls ? 'secureConnect' : 'connect', res); sock.on('error', res); });
+    return {
+        ready,
+        request(msg) { return new Promise((res) => { pending = { res, t: setTimeout(() => { pending = null; res(null); }, TIMEOUT) }; sock.write(msg); }); },
+        close() { try { sock.destroy(); } catch {} }
+    };
+}
+
+async function allocateOnce(url, user, pass) {
+    const u = new URL(url.replace(/^turns?:/, 'http:'));
+    const host = u.hostname;
+    const isTls = url.startsWith('turns:');
+    const transport = (u.searchParams.get('transport') || 'udp').toLowerCase();
+    const port = parseInt(u.port || (isTls ? '5349' : '3478'), 10);
+    const useTcp = isTls || transport === 'tcp';
+    const mode = isTls ? 'TLS/TCP' : (useTcp ? 'TCP' : 'UDP');
+
+    let ip = null;
+    try { ip = (await dns.lookup(host, { family: 4 })).address; } catch (e) { return { ok: false, mode, ip: null, reason: 'DNS lookup failed: ' + e.code }; }
+
+    const ch = useTcp ? tcpChannel(host, port, isTls) : udpChannel(host, port);
+    await ch.ready;
+    try {
+        const txn = crypto.randomBytes(12);
+        let resp = await ch.request(buildAllocate(txn));
+        if (!resp) return { ok: false, mode, ip, reason: 'no response to initial Allocate (' + mode + ' blocked, firewall, or wrong port)' };
+        let type = resp.readUInt16BE(0);
+        if (type === 0x0113) {
+            const a = parseAttrs(resp);
+            const realm = a[0x0014], nonce = a[0x0015];
+            if (!realm || !nonce) { const e = errCode(a); return { ok: false, mode, ip, reason: 'challenge without realm/nonce (code ' + e.code + ' ' + e.reason + ')' }; }
+            // Same channel, fresh transaction; retry once if the first auth is dropped.
+            let authResp = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                authResp = await ch.request(buildAuthAllocate(crypto.randomBytes(12), user, realm, nonce, pass));
+                if (authResp) break;
+            }
+            resp = authResp;
+            if (!resp) return { ok: false, mode, ip, reason: 'server reachable (got 401 challenge) but no response to authenticated Allocate' };
+            type = resp.readUInt16BE(0);
+        }
+        if (type === 0x0103) {
+            const a = parseAttrs(resp);
+            return { ok: true, mode, ip, relay: xorAddr(a[0x0016]) || '(relayed)', mapped: xorAddr(a[0x0020]) };
+        }
+        const a = parseAttrs(resp); const e = errCode(a);
+        if (type === 0x0113) return { ok: false, mode, ip, reason: 'AUTH REJECTED code ' + e.code + (e.reason ? ' "' + e.reason + '"' : '') + ' — username/credential wrong or expired' };
+        return { ok: false, mode, ip, reason: 'unexpected STUN type 0x' + type.toString(16) + ' code ' + e.code };
+    } finally { ch.close(); }
+}
+
+function mintOpenrelay() {
+    const secret = 'openrelayprojectsecret';
+    const username = Math.floor(Date.now() / 1000) + 86400 + ':together';
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    return {
+        urls: ['turn:staticauth.openrelay.metered.ca:80', 'turn:staticauth.openrelay.metered.ca:443', 'turn:staticauth.openrelay.metered.ca:443?transport=tcp', 'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+        username, credential
+    };
+}
+function parseConfig() {
+    if (process.argv.includes('--openrelay')) return [mintOpenrelay()];
+    if (process.argv.includes('--control')) {
+        return [{ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }];
+    }
+    if (process.env.TURN_USER && process.env.TURN_PASS) {
+        return [{ urls: ['turn:global.relay.metered.ca:80', 'turn:global.relay.metered.ca:443', 'turn:global.relay.metered.ca:443?transport=tcp', 'turns:global.relay.metered.ca:443?transport=tcp'], username: process.env.TURN_USER, credential: process.env.TURN_PASS }];
+    }
+    const file = process.argv[2] || path.join(__dirname, 'turn.txt');
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+async function main() {
+    let cfg;
+    try { cfg = parseConfig(); } catch (e) { console.error('Cannot read TURN config: ' + e.message); process.exit(1); }
+    let anyOk = false;
+    for (const e of cfg) {
+        if (!e || !e.urls || !e.username) continue;
+        const urls = Array.isArray(e.urls) ? e.urls : [e.urls];
+        const user = String(e.username).trim(), pass = String(e.credential || '').trim();
+        for (const url of urls) {
+            if (!/^turns?:/.test(url)) continue;
+            const r = await allocateOnce(url, user, pass);
+            const tag = r.ok ? 'OK  ' : 'FAIL';
+            console.log(tag + ' ' + url + '  [' + r.mode + (r.ip ? ' ip=' + r.ip : ' ip=DNS-FAIL') + ']  ' + (r.ok ? 'relay=' + r.relay + (r.mapped ? ' mapped=' + r.mapped : '') : r.reason));
+            if (r.ok) anyOk = true;
+        }
+    }
+    console.log(anyOk ? '\nRESULT: TURN reachable and credentials VALID.' : '\nRESULT: no TURN allocation succeeded.');
+    process.exit(anyOk ? 0 : 1);
+}
+if (require.main === module) main();
+module.exports = { allocateOnce, mintOpenrelay };

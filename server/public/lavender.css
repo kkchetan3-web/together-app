@@ -1,22 +1,40 @@
 :root{
+  color-scheme:dark;
+  /* Lavender glass — original palette, higher fidelity */
   --bg:#141026;
-  --glass:rgba(167,139,250,0.07);
-  --glass-strong:rgba(167,139,250,0.14);
-  --border:rgba(196,181,253,0.16);
+  --glass:rgba(167,139,250,0.10);
+  --glass-strong:rgba(167,139,250,0.18);
+  --glass-thick:rgba(38,28,70,0.84);
+  --border:rgba(196,181,253,0.24);
+  --separator:rgba(196,181,253,0.15);
+  --fill:rgba(167,139,250,0.16);
+  --fill-hi:rgba(167,139,250,0.27);
+  --fill-lo:rgba(167,139,250,0.09);
+  --seg-track:rgba(167,139,250,0.14);
+  --seg-on:linear-gradient(135deg,#A78BFA,#6C5CE7);
   --text:#F1EDFC;
   --text-muted:#A79EC4;
   --accent:#A78BFA;
   --accent-2:#C4B5FD;
   --brand:#6C5CE7;
   --danger:#F0506E;
-  --radius-sm:14px;
-  --radius:20px;
-  --radius-lg:28px;
-  --shadow:0 12px 36px rgba(15,8,40,0.5);
-  --shadow-soft:0 4px 24px rgba(15,8,40,0.35);
-  --blur:blur(26px) saturate(1.6);
+  /* One UI generous, continuous corners */
+  --radius-sm:16px;
+  --radius:22px;
+  --radius-lg:30px;
+  --radius-xl:36px;
+  --shadow:0 18px 48px rgba(15,8,40,0.55);
+  --shadow-soft:0 8px 28px rgba(15,8,40,0.38);
+  --blur:blur(30px) saturate(1.9);
+  /* specular rim: lit top edge, deep violet underside */
+  --rim:inset 0 1px 0 rgba(255,255,255,.20),inset 0 -1px 0 rgba(76,52,140,.34);
+  --rim-hi:inset 0 1px 0 rgba(255,255,255,.34),inset 0 -1px 0 rgba(76,52,140,.40);
+  /* gradient-lit border used via padding-box/border-box layering */
+  --edge:linear-gradient(140deg,rgba(255,255,255,.40),rgba(196,181,253,.16) 42%,rgba(124,106,239,.38));
+  --ease:cubic-bezier(.32,.72,0,1);
   --grad:linear-gradient(135deg,#A78BFA 0%,#7C6AEF 52%,#6C5CE7 100%);
-  --font:'SamsungOne','Samsung Sans','Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --grad-soft:linear-gradient(135deg,rgba(167,139,250,.30),rgba(108,92,231,.20));
+  --font:'SamsungOne','Samsung Sans','One UI Sans','Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100dvh;width:100vw;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
@@ -37,6 +55,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 /* LOBBY */
 #lobby{max-width:420px;margin:9vh auto;padding:38px 32px;display:grid;gap:16px;text-align:center;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);position:relative;z-index:10}
 #lobby h1{font-size:34px;font-weight:700;letter-spacing:-0.6px;background:linear-gradient(135deg,#ffffff 25%,var(--accent-2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.lobby-status{font-size:13px;color:var(--text-muted);min-height:18px}
+.lobby-status.ok{color:#7EE2A8}
+.lobby-status.error{color:#FF9AAE}
 
 /* APP GRID */
 #app{display:none;height:100dvh;grid-template-columns:1fr 360px;gap:12px;padding:12px}
@@ -44,6 +65,9 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #views{flex:1;display:flex;min-height:0;position:relative}
 #views video{width:100%;height:100%;object-fit:contain;background:#0b0817}
 #screen{display:none}
+#ytWrap{position:absolute;inset:0;display:none;background:#000}
+#ytPlayer,#ytWrap iframe{width:100%;height:100%;border:0;display:block}
+#ytUnlock{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;font-size:18px;font-weight:700;cursor:pointer;z-index:5;text-align:center;padding:12px}
 
 /* CONTROL BAR */
 #bar{display:flex;align-items:center;gap:6px;padding:10px 12px;background:rgba(24,18,46,0.88);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border-top:1px solid var(--border);flex-wrap:wrap;flex-shrink:0;position:relative}
@@ -59,7 +83,10 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #side{display:flex;flex-direction:column;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow);min-height:0}
 
 /* CALL STATUS */
-.call-status{padding:8px 14px;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(167,139,250,0.06);flex-shrink:0;display:flex;align-items:center;gap:7px}
+.call-status{padding:8px 14px;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(167,139,250,0.06);flex-shrink:0;display:flex;align-items:center;gap:7px;cursor:pointer}
+.diagBody{font-size:12px;line-height:1.6;color:var(--text);background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:10px;white-space:pre-wrap;font-variant-numeric:tabular-nums;max-height:40dvh;overflow-y:auto}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:340px;max-width:94vw;max-height:88dvh;overflow-y:auto;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:16px;z-index:100005;display:flex;flex-direction:column;gap:10px}
+.modal[hidden]{display:none}
 .call-status::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
 .call-status.ok{color:#7EE2A8}.call-status.ok::before{background:#7EE2A8;box-shadow:0 0 8px rgba(126,226,168,.7)}
 .call-status.warn{color:#FFC46B}.call-status.warn::before{background:#FFC46B;box-shadow:0 0 8px rgba(255,196,107,.7)}
@@ -73,22 +100,32 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #peerName{color:var(--accent-2);font-weight:600}
 
 /* DUAL VIDEO CALL */
-#videoGrid{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(11,8,23,0.35);justify-content:center}
-.camBox{position:relative;flex:1;aspect-ratio:3/4;max-height:140px;background:#0b0817;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:all .3s ease;display:flex;flex-direction:column}
+#videoGrid{display:flex;gap:10px;padding:10px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(11,8,23,0.35);justify-content:center;align-items:stretch}
+/* Partner first: left on desktops/landscape, top when stacked. */
+#boxThem{order:-1}
+.camBox{position:relative;flex:1 1 0;min-width:0;aspect-ratio:16/9;max-height:44dvh;min-height:120px;background:#0b0817;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:all .3s ease;display:flex;flex-direction:column}
 .camBox video{width:100%;height:100%;object-fit:cover}
 .camBox.hidden video{display:none}
-.camBox.hidden::after{content:"Camera Hidden";display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:11px;text-align:center}
-.camControls{position:absolute;bottom:4px;right:4px;display:flex;gap:4px;z-index:2}
-.camControls button{padding:4px 6px;font-size:10px;border-radius:8px;background:rgba(11,8,23,0.75);border:1px solid rgba(196,181,253,0.3);color:#fff}
-.camBox.maximized{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) translateZ(0);isolation:isolate;height:85dvh;width:calc(85dvh * 9 / 16);max-width:95vw;max-height:calc(95vw * 16 / 9);aspect-ratio:9/16 !important;z-index:99999;border:2px solid var(--accent);border-radius:20px;box-shadow:0 0 60px rgba(15,8,40,0.95);flex:none;background:#0b0817}
-.camBox.maximized .camControls{top:10px;bottom:auto;right:10px}
-.camBox.maximized .camControls button{font-size:14px;padding:8px 12px;background:rgba(11,8,23,0.85);border-color:var(--accent)}
+.camBox.hidden::after{content:"Camera Hidden";display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;text-align:center}
+.camLabel{position:absolute;top:6px;left:8px;z-index:2;font-size:11px;font-weight:600;letter-spacing:.3px;color:#fff;background:rgba(11,8,23,0.6);border:1px solid rgba(196,181,253,0.25);padding:3px 8px;border-radius:999px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:none}
+.camControls{position:absolute;bottom:6px;right:6px;display:flex;gap:6px;z-index:2}
+.camControls button{padding:6px 10px;font-size:11px;border-radius:10px;background:rgba(11,8,23,0.75);border:1px solid rgba(196,181,253,0.3);color:#fff}
+/* Maximized = fit-to-screen: whole frame visible, correct aspect, nothing cropped */
+.camBox.maximized{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;min-height:0;aspect-ratio:auto;transform:none;isolation:isolate;z-index:99999;border:none;border-radius:0;box-shadow:none;flex:none;background:#000}
+.camBox.maximized video{object-fit:contain}
+.camBox.maximized .camControls{top:calc(10px + env(safe-area-inset-top,0px));bottom:auto;right:10px}
+.camBox.maximized .camControls button{font-size:15px;padding:10px 16px;background:rgba(11,8,23,0.85);border-color:var(--accent)}
+.camBox.maximized .camLabel{font-size:14px;top:calc(12px + env(safe-area-inset-top,0px));left:12px}
+/* Picture-in-picture: while one camera is maximized, the other floats in a corner */
+.camBox.pip{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;left:auto;bottom:auto;width:clamp(110px,26vw,240px);aspect-ratio:16/9;max-height:none;min-height:0;flex:none;z-index:100000;border:2px solid var(--accent);border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.65);background:#0b0817;cursor:grab;touch-action:none}
+.camBox.pip:active{cursor:grabbing}
+.camBox.pip video{object-fit:cover}
+.camBox.pip .camControls{display:none}
+.camBox.pip .camLabel{font-size:10px;top:4px;left:6px;padding:2px 6px}
+.camBox.pip.hidden::after{font-size:10px}
 #maxBackdrop{display:none;position:fixed;inset:0;background:rgba(11,8,23,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99998}
 
-/* MOVIE FULLSCREEN */
-body.is-fullscreen #app{padding:0 !important;display:block !important;grid-template-columns:none}
-body.is-fullscreen #bar,body.is-fullscreen #side{display:none !important}
-body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100dvh !important;border-radius:0 !important;z-index:1000 !important}
+
 
 /* QUEUE */
 #queue{display:none;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -118,10 +155,522 @@ body.is-fullscreen #stage{position:fixed !important;top:0 !important;left:0 !imp
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:rgba(196,181,253,0.2);border-radius:4px}
 
+/* THEME SWITCH (dark / light / system) */
+.themeRow{display:flex;align-items:center;justify-content:center;gap:8px}
+.themeSwitch{display:inline-flex;align-items:center;gap:2px;background:var(--glass);border:1px solid var(--border);border-radius:999px;padding:3px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.themeSwitch button{padding:5px 12px;font-size:12px;border:none;background:transparent;border-radius:999px;color:var(--text-muted);box-shadow:none;font-weight:600;white-space:nowrap}
+.themeSwitch button:hover{background:var(--glass-strong);transform:none}
+.themeSwitch button.on{background:var(--grad);color:#fff;box-shadow:0 2px 10px rgba(108,92,231,0.35)}
+#profileCard .themeRow{justify-content:flex-start}
+#profileCard .themeSwitch button{padding:4px 9px;font-size:11px}
+
+/* LIGHT THEME — additive overrides; dark (default) is untouched.
+   Video wells/player stay dark in both themes (standard for video). */
+html[data-theme="light"]{
+  color-scheme:light;
+  --bg:#F5F2FC;
+  --glass:rgba(255,255,255,0.62);
+  --glass-strong:rgba(255,255,255,0.80);
+  --glass-thick:rgba(255,255,255,0.90);
+  --border:rgba(108,92,231,0.24);
+  --separator:rgba(108,92,231,0.15);
+  --fill:rgba(108,92,231,0.11);
+  --fill-hi:rgba(108,92,231,0.19);
+  --fill-lo:rgba(108,92,231,0.06);
+  --seg-track:rgba(108,92,231,0.11);
+  --seg-on:linear-gradient(135deg,#8B6FEF,#6C5CE7);
+  --text:#251C3F;
+  --text-muted:#6E6590;
+  --accent:#7C5CE7;
+  --accent-2:#5B4BD6;
+  --brand:#6C5CE7;
+  --danger:#D63A5C;
+  --shadow:0 18px 48px rgba(108,92,231,0.18);
+  --shadow-soft:0 8px 28px rgba(108,92,231,0.12);
+  --rim:inset 0 1px 0 rgba(255,255,255,.90),inset 0 -1px 0 rgba(108,92,231,.08);
+  --rim-hi:inset 0 1px 0 rgba(255,255,255,.96),inset 0 -1px 0 rgba(108,92,231,.10);
+  --edge:linear-gradient(140deg,rgba(255,255,255,.96),rgba(108,92,231,.18) 45%,rgba(124,92,231,.34));
+}
+html[data-theme="light"] body{background-image:radial-gradient(circle at 12% 12%,rgba(167,139,250,0.18),transparent 46%),radial-gradient(circle at 88% 88%,rgba(124,106,239,0.14),transparent 46%),radial-gradient(circle at 50% 50%,rgba(196,181,253,0.25),transparent 72%)}
+html[data-theme="light"] #lobby h1{background:linear-gradient(135deg,#3A2E63 25%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+html[data-theme="light"] #bar{background:rgba(255,255,255,0.82)}
+html[data-theme="light"] #videoGrid{background:rgba(108,92,231,0.08)}
+html[data-theme="light"] #log{background:rgba(255,255,255,0.5)}
+html[data-theme="light"] #log>div{background:rgba(108,92,231,0.07);border-color:rgba(108,92,231,0.12)}
+html[data-theme="light"] #chatForm{background:rgba(255,255,255,0.6)}
+html[data-theme="light"] #progWrap{background:rgba(108,92,231,0.15)}
+html[data-theme="light"] #profileCard{background:rgba(108,92,231,0.07)}
+html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,0.3)}
+html[data-theme="light"] button:hover{background:rgba(108,92,231,0.14)}
+html[data-theme="light"] .lobby-status.ok{color:#1E9E5A}
+html[data-theme="light"] .lobby-status.error{color:#D63A5C}
+html[data-theme="light"] .call-status.ok{color:#1E9E5A}
+html[data-theme="light"] .call-status.warn{color:#B26A00}
+
+/* ---- UX batch (features 3,4,6,8,11,16) ---- */
+#toasts{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:100001;pointer-events:none;width:max-content;max-width:92vw}
+.toast{padding:8px 14px;border-radius:999px;background:var(--glass-strong);border:1px solid var(--border);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);color:var(--text);font-size:13px;font-weight:600;box-shadow:var(--shadow-soft);animation:toastIn .25s ease;text-align:center}
+.toast.ok{border-color:rgba(126,226,168,.5);color:#7EE2A8}
+.toast.warn{border-color:rgba(255,196,107,.5);color:#FFC46B}
+.toast.error{border-color:rgba(240,80,110,.5);color:#FF9AAE}
+html[data-theme="light"] .toast.ok{color:#1E9E5A}
+html[data-theme="light"] .toast.warn{color:#B26A00}
+html[data-theme="light"] .toast.error{color:#D63A5C}
+@keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+#countOverlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(11,8,23,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:100002}
+#countOverlay[hidden]{display:none}
+#countNum{font-size:110px;font-weight:800;color:#fff;text-shadow:0 0 40px rgba(167,139,250,.8);animation:pop .9s ease}
+#countBy{color:var(--accent-2);font-size:14px;margin-top:8px}
+@keyframes pop{0%{transform:scale(.4);opacity:0}30%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}
+#chatHead{display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);border-top:1px solid var(--border);flex-shrink:0}
+#chatHead span:first-child{flex:1}
+#chatToggle{padding:2px 8px;font-size:12px;border-radius:8px}
+.badge{background:var(--danger);color:#fff;border-radius:999px;font-size:10px;font-weight:700;padding:1px 6px;min-width:16px;text-align:center}
+#typing{min-height:16px;padding:0 12px;font-size:11px;color:var(--text-muted);font-style:italic;flex-shrink:0}
+body.chat-hidden #log,body.chat-hidden #chatForm,body.chat-hidden #typing,body.chat-hidden #chatHead,body.chat-hidden #emojiPanel{display:none}
+#chatReopen{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:900;border-radius:999px;padding:10px 14px;font-size:18px;background:var(--grad);color:#fff;border:none;box-shadow:var(--shadow)}
+#chatReopen[hidden]{display:none}
+#chatReopen .badge{position:absolute;top:-4px;right:-4px}
+#emojiPanel{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:8px;border-top:1px solid var(--border);background:var(--glass);flex-shrink:0;max-height:120px;overflow-y:auto}
+#emojiPanel[hidden]{display:none}
+#emojiPanel button{padding:4px;font-size:18px;background:transparent;border:none;border-radius:8px}
+#emojiPanel button:hover{background:var(--glass-strong)}
+#log .chatImg{max-width:180px;max-height:140px;border-radius:12px;display:block;margin-top:4px;cursor:zoom-in;border:1px solid var(--border)}
+#log .ts{float:right;font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px}
+#log .reactions{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+#log .reactions button{padding:1px 7px;font-size:12px;border-radius:999px;background:var(--glass-strong);border:1px solid var(--border)}
+#log .reactions button.mine{border-color:var(--accent);background:rgba(167,139,250,.25)}
+#log .reactAdd{padding:0 6px;font-size:11px;border-radius:999px;background:transparent;border:1px dashed var(--border);color:var(--text-muted);margin-top:4px}
+#imgView{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:100003;cursor:zoom-out}
+#imgView[hidden]{display:none}
+#imgView img{max-width:94vw;max-height:92dvh;border-radius:12px}
+#bookmarks{display:none;border-bottom:1px solid var(--border);flex-shrink:0}
+#bookmarks.has{display:block;padding:6px 10px;max-height:90px;overflow-y:auto}
+#bookmarks .btitle{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+#bookmarks .bitem{display:flex;align-items:center;gap:6px;padding:4px 8px;font-size:12px;border-radius:10px;cursor:pointer;margin-bottom:2px}
+#bookmarks .bitem:hover{background:rgba(196,181,253,.08)}
+#bookmarks .btime{color:var(--accent-2);font-weight:700;font-variant-numeric:tabular-nums}
+#bookmarks .blabel{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bookmarks .bdel{padding:0 6px;font-size:11px;background:transparent;border:none;color:var(--text-muted)}
+#comfortPanel{position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top,0px));width:280px;max-width:92vw;background:var(--glass-strong);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);padding:14px;z-index:100004;display:flex;flex-direction:column;gap:10px}
+#comfortPanel[hidden]{display:none}
+.cpHead{display:flex;align-items:center;justify-content:space-between;font-size:14px}
+.cpHead button{padding:2px 8px;font-size:12px}
+.cpRow{display:flex;align-items:center;gap:8px;font-size:13px}
+.cpRow input[type="range"]{flex:1;padding:0}
+.cpHint{font-size:11px;color:var(--text-muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body.reduced-motion *,body.reduced-motion *::before,body.reduced-motion *::after{animation:none !important;transition:none !important;scroll-behavior:auto !important}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none !important;transition:none !important}}
+body.high-contrast{--text:#FFFFFF;--text-muted:#D8D2EE;--border:rgba(255,255,255,.5);--glass:rgba(255,255,255,.12);--glass-strong:rgba(255,255,255,.2)}
+html[data-theme="light"] body.high-contrast{--text:#000000;--text-muted:#333333;--border:rgba(0,0,0,.5);--glass:rgba(0,0,0,.06);--glass-strong:rgba(0,0,0,.12)}
+body{--tscale:1}
+#log,#log>div{font-size:calc(13px*var(--tscale))}
+#chatForm input{font-size:calc(13px*var(--tscale))}
+#typing{font-size:calc(11px*var(--tscale))}
+#queue .item,#bookmarks .bitem{font-size:calc(12px*var(--tscale))}
+@media (orientation: landscape) and (max-height: 520px){
+/* Scoped to non-phones: phones get their own landscape layout further down.
+   (This block once applied to phones too and its 2-column grid collided
+   with the phone tab layout -> the landscape glitches.) */
+html:not(.device-phone) #app{grid-template-columns:1fr 300px;gap:8px;padding:8px}
+html:not(.device-phone) #profileCard{padding:8px}
+html:not(.device-phone) #videoGrid{padding:6px}
+html:not(.device-phone) .camBox{max-height:30dvh;min-height:80px}
+html:not(.device-phone) #bar{padding:4px 6px;gap:4px}
+html:not(.device-phone) #bar button{padding:6px 8px;font-size:11px}
+html:not(.device-phone) #lobby{margin:4vh auto;padding:18px}
+}
+
 /* RESPONSIVE */
 @media (max-width: 900px) or (orientation: portrait){
-#app{grid-template-columns:1fr;grid-template-rows:38dvh 1fr;gap:10px;padding:10px}
+/* minmax(0,..) is essential: a bare `1fr` row has an implicit auto minimum,
+   so the panels above the chat could squeeze #log to zero height and the
+   chat became unscrollable on a phone. */
+#app{grid-template-columns:1fr;grid-template-rows:minmax(0,34dvh) minmax(0,1fr);gap:10px;padding:10px}
 #bar{padding:6px 8px}
 #bar input[type="text"]{min-width:80px}
 #lobby{margin:8vh auto;padding:26px}
+#side{min-height:0;overscroll-behavior:contain}
+#log{min-height:96px;overscroll-behavior:contain;touch-action:pan-y}
+#queue.has{max-height:64px}
+#bookmarks.has{max-height:56px}
+#emojiPanel{max-height:96px}
+#profileCard{padding:8px;gap:4px}
+}
+/* Touch scrolling for the chat on every form factor. */
+#log{-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y}
+#queue.has,#bookmarks.has,#emojiPanel,.diagBody,.modal{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+
+/* ============================================================
+   LAVENDER GLASS  ·  One UI polish
+   The original lavender gradient glass, rebuilt at higher
+   fidelity: gradient-lit edges, specular top highlights,
+   stronger blur + saturation, and One UI's generous radii,
+   calm spacing and clean grouped surfaces. Colour stays
+   visible everywhere — no neutral grey materials.
+   ============================================================ */
+
+/* ---- wallpaper: richer lavender depth ---- */
+body{
+  background-image:
+    radial-gradient(circle at 10% 8%,rgba(167,139,250,0.30),transparent 48%),
+    radial-gradient(circle at 92% 92%,rgba(124,106,239,0.26),transparent 48%),
+    radial-gradient(circle at 50% 50%,rgba(76,52,150,0.40),transparent 74%);
+  background-attachment:fixed;
+}
+html,body{letter-spacing:-.006em;-webkit-text-size-adjust:100%}
+
+/* Gradient-lit edge: a bright lavender rim that catches the light on the
+   top-left and deepens to brand violet on the bottom-right. This is what
+   makes the glass read as a physical pane instead of a flat rectangle. */
+#lobby,#side,#stage,#bar,.modal,#comfortPanel,.toast{
+  border:1px solid transparent;
+  background:
+    linear-gradient(var(--glass),var(--glass)) padding-box,
+    var(--edge) border-box;
+}
+
+/* ---- controls: One UI pills, comfortable touch targets ---- */
+input,button{
+  border:1px solid var(--border);background:var(--fill);color:var(--text);
+  font-size:14px;padding:11px 16px;border-radius:var(--radius-sm);
+  box-shadow:var(--rim);
+  transition:transform .24s var(--ease),background .2s ease,box-shadow .2s ease,border-color .2s ease;
+}
+button{border-radius:999px;font-weight:650;letter-spacing:-.005em}
+input:focus{border-color:var(--accent);box-shadow:var(--rim),0 0 0 3.5px rgba(167,139,250,.30)}
+button:hover{background:var(--fill-hi);border-color:rgba(196,181,253,.34);transform:none}
+button:active{transform:scale(.955)}
+button:disabled{opacity:.42}
+#create,#join,#chatForm button{
+  background:var(--grad);color:#fff;border:none;font-weight:700;
+  box-shadow:0 8px 24px rgba(108,92,231,.46),var(--rim-hi);
+}
+#create:hover,#join:hover,#chatForm button:hover{background:var(--grad);filter:brightness(1.07)}
+#delBtn{background:rgba(240,80,110,.14);color:var(--danger);border-color:rgba(240,80,110,.38)}
+#delBtn:hover{background:rgba(240,80,110,.24)}
+:focus-visible{outline:2.5px solid var(--accent-2);outline-offset:3px}
+
+/* ---- lobby ---- */
+#lobby{
+  background:
+    linear-gradient(var(--glass-strong),var(--glass-strong)) padding-box,
+    var(--edge) border-box;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-radius:var(--radius-xl);box-shadow:var(--shadow),var(--rim-hi);
+  padding:36px 30px;gap:15px;
+}
+#lobby h1{
+  font-size:34px;font-weight:750;letter-spacing:-.022em;
+  background:linear-gradient(135deg,#FFFFFF 20%,var(--accent-2) 78%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+#lobby input{padding:13px 17px;font-size:15px;border-radius:var(--radius-sm)}
+#create,#join{padding:14px 18px;font-size:15px}
+.lobby-status{font-size:13px}
+
+/* ---- stage + floating control bar ---- */
+#stage{
+  background:linear-gradient(#0b0817,#0b0817) padding-box,var(--edge) border-box;
+  border-radius:var(--radius-lg);box-shadow:var(--shadow),var(--rim);
+}
+#bar{
+  margin:10px;padding:9px 11px;gap:7px;
+  background:
+    linear-gradient(var(--glass-strong),var(--glass-strong)) padding-box,
+    var(--edge) border-box;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-radius:var(--radius);box-shadow:var(--shadow-soft),var(--rim-hi);
+}
+#bar input[type="text"]{padding:9px 14px;font-size:13px;border-radius:999px}
+#bar button{padding:9px 14px;font-size:12.5px}
+#progWrap{top:-1px;left:14px;right:14px;height:3px;border-radius:999px;overflow:hidden;background:rgba(196,181,253,.14)}
+
+/* ---- sidebar sheet ---- */
+#side{
+  background:
+    linear-gradient(var(--glass),var(--glass)) padding-box,
+    var(--edge) border-box;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow),var(--rim-hi);
+}
+.call-status{
+  background:var(--grad-soft);border-bottom:1px solid var(--separator);
+  padding:11px 16px;font-size:12.5px;font-weight:650;
+}
+#profileCard{background:rgba(167,139,250,.10);border-bottom:1px solid var(--separator);padding:13px 14px;gap:8px}
+#profileCard input{border-radius:12px;padding:8px 12px;font-size:13px}
+#profileCard button{padding:8px 13px;font-size:12.5px}
+.nameLabel{font-size:12px}
+#peerName{font-weight:650}
+
+/* ---- segmented theme control ---- */
+.themeSwitch{
+  background:var(--seg-track);border:1px solid var(--border);border-radius:999px;
+  padding:3px;gap:2px;box-shadow:var(--rim);
+}
+.themeSwitch button{
+  border:none;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:650;
+  background:transparent;box-shadow:none;color:var(--text-muted);
+}
+.themeSwitch button:hover{background:rgba(196,181,253,.14);color:var(--text)}
+.themeSwitch button.on{
+  background:var(--seg-on);color:#fff;font-weight:700;
+  box-shadow:0 3px 12px rgba(108,92,231,.42),var(--rim-hi);
+}
+#profileCard .themeSwitch button{padding:5px 11px;font-size:11px}
+
+/* ---- call tiles ---- */
+#videoGrid{background:rgba(76,52,150,.16);border-bottom:1px solid var(--separator);padding:12px;gap:10px}
+.camBox{border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow-soft),var(--rim)}
+.camLabel{
+  background:rgba(38,28,70,.62);border:1px solid rgba(196,181,253,.30);
+  backdrop-filter:blur(16px) saturate(1.7);-webkit-backdrop-filter:blur(16px) saturate(1.7);
+  border-radius:999px;padding:4px 10px;font-size:11px;font-weight:650;
+}
+.camControls button{
+  background:rgba(38,28,70,.72);border:1px solid rgba(196,181,253,.34);
+  border-radius:999px;padding:7px 12px;font-size:11.5px;color:#fff;
+  backdrop-filter:blur(16px) saturate(1.7);-webkit-backdrop-filter:blur(16px) saturate(1.7);
+}
+.camBox.pip{border-radius:18px;border:2px solid var(--accent);box-shadow:0 14px 40px rgba(15,8,40,.66)}
+#maxBackdrop{background:rgba(11,8,23,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+
+/* ---- episodes + bookmarks: clean grouped rows ---- */
+#queue,#bookmarks{border-bottom:1px solid var(--separator)}
+#queue.has,#bookmarks.has{padding:11px 12px}
+#queue .qtitle,#bookmarks .btitle{
+  font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--accent-2);padding:0 4px 7px;
+}
+#queue .item,#bookmarks .bitem{
+  border-radius:14px;padding:9px 12px;margin-bottom:4px;font-size:13px;
+  background:var(--fill-lo);border:1px solid transparent;
+  transition:background .2s ease,border-color .2s ease,transform .2s var(--ease);
+}
+#queue .item:hover,#bookmarks .bitem:hover{background:var(--fill);border-color:var(--border)}
+#queue .item:active,#bookmarks .bitem:active{transform:scale(.985)}
+#queue .item.cur{
+  background:var(--grad-soft);border-color:rgba(196,181,253,.40);
+  color:var(--accent-2);font-weight:650;box-shadow:var(--rim);
+}
+#queue .item .n{font-variant-numeric:tabular-nums;font-weight:700}
+#bookmarks .btime{font-weight:700}
+#bookmarks .bdel{border-radius:999px;box-shadow:none;background:transparent;border:none}
+
+/* ---- chat: lavender gradient bubbles ---- */
+#log{margin:0;padding:14px 12px;gap:8px;background:transparent;border:none;border-radius:0}
+#log>div{
+  max-width:86%;align-self:flex-start;padding:10px 14px;
+  border-radius:20px 20px 20px 8px;
+  background:var(--glass-strong);border:1px solid var(--border);
+  box-shadow:var(--rim);font-size:14px;line-height:1.45;
+}
+#log>div.me{
+  align-self:flex-end;border-radius:20px 20px 8px 20px;
+  background:var(--grad);border:none;color:#fff;
+  box-shadow:0 4px 16px rgba(108,92,231,.38),var(--rim-hi);
+}
+#log>div.me b{display:none}
+#log>div.me .ts{color:rgba(255,255,255,.78)}
+#log>div.me .reactAdd{color:rgba(255,255,255,.85);border-color:rgba(255,255,255,.42)}
+#log b{font-size:11.5px;font-weight:700;color:var(--accent-2);display:block;margin-bottom:2px}
+#log .ts{font-size:10px;opacity:.8;font-weight:400}
+#log>div.sys{
+  align-self:center;max-width:100%;background:transparent;border:none;box-shadow:none;
+  font-style:italic;font-size:11.5px;color:var(--text-muted);padding:3px 10px;text-align:center;
+}
+#log .chatImg{border-radius:14px;border:1px solid var(--border);max-width:220px}
+#log .reactions button{background:var(--fill);border:1px solid var(--border);box-shadow:none;padding:2px 8px}
+#log .reactions button.mine{background:rgba(167,139,250,.32);border-color:var(--accent)}
+#log .reactAdd{box-shadow:none;font-size:10px;padding:1px 8px;margin-top:5px;opacity:.75;background:transparent}
+#chatHead{border-top:1px solid var(--separator);padding:9px 16px;font-size:10.5px;font-weight:700;letter-spacing:.07em}
+#chatToggle{border-radius:999px;padding:3px 11px;box-shadow:none;background:var(--fill-lo)}
+#typing{padding:0 16px 4px;font-size:11.5px}
+#chatForm{
+  background:rgba(76,52,150,.16);border-top:1px solid var(--separator);
+  padding:11px 12px;gap:8px;padding-bottom:calc(11px + env(safe-area-inset-bottom,0px));
+}
+#chatForm input{border-radius:999px;padding:11px 17px;font-size:14px}
+#chatForm button{border-radius:999px;padding:11px 19px}
+.badge{background:var(--danger);font-weight:700;font-size:10px;padding:2px 6px}
+#chatReopen{box-shadow:0 10px 30px rgba(108,92,231,.52),var(--rim-hi);padding:12px 16px}
+#emojiPanel{background:rgba(167,139,250,.08);border-top:1px solid var(--separator);padding:10px;gap:4px}
+#emojiPanel button{border-radius:12px;box-shadow:none;background:transparent;border:none}
+#emojiPanel button:hover{background:var(--fill)}
+
+/* ---- sheets, toasts, overlays ---- */
+.modal,#comfortPanel{
+  background:
+    linear-gradient(var(--glass-strong),var(--glass-strong)) padding-box,
+    var(--edge) border-box;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow),var(--rim-hi);padding:18px;
+}
+.diagBody{background:rgba(11,8,23,.34);border:1px solid var(--border);border-radius:14px;padding:12px;font-size:12px}
+.toast{
+  background:
+    linear-gradient(var(--glass-strong),var(--glass-strong)) padding-box,
+    var(--edge) border-box;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border-radius:999px;padding:10px 20px;font-size:13px;font-weight:650;
+  box-shadow:var(--shadow-soft),var(--rim-hi);animation:toastIn .32s var(--ease);
+}
+#countOverlay{background:rgba(11,8,23,.74);backdrop-filter:blur(12px) saturate(1.5);-webkit-backdrop-filter:blur(12px) saturate(1.5)}
+#countNum{font-weight:800;letter-spacing:-.03em}
+#imgView{background:rgba(11,8,23,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+#imgView img{border-radius:18px}
+#ytUnlock{background:rgba(11,8,23,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-weight:700}
+.cpRow input[type="range"]{accent-color:var(--accent);box-shadow:none;background:transparent;border:none}
+
+/* Slim lavender scrollbar — visible colour, still tidy. */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(196,181,253,.34);border-radius:999px}
+::-webkit-scrollbar-thumb:hover{background:rgba(196,181,253,.5)}
+
+/* ---- light appearance ---- */
+html[data-theme="light"] body{
+  background-image:
+    radial-gradient(circle at 10% 8%,rgba(167,139,250,0.24),transparent 48%),
+    radial-gradient(circle at 92% 92%,rgba(124,106,239,0.18),transparent 48%),
+    radial-gradient(circle at 50% 50%,rgba(196,181,253,0.32),transparent 74%);
+}
+html[data-theme="light"] #lobby h1{background:linear-gradient(135deg,#3A2E63 20%,var(--accent) 82%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+html[data-theme="light"] #videoGrid,html[data-theme="light"] #chatForm{background:rgba(108,92,231,.07)}
+html[data-theme="light"] #profileCard,html[data-theme="light"] #emojiPanel{background:rgba(108,92,231,.06)}
+html[data-theme="light"] #log{background:transparent}
+html[data-theme="light"] #log>div{background:var(--glass-strong);border-color:var(--border)}
+html[data-theme="light"] #log>div.me{background:var(--grad);color:#fff;border:none}
+html[data-theme="light"] #log>div.sys{background:transparent;border:none}
+html[data-theme="light"] .diagBody{background:rgba(108,92,231,.06)}
+html[data-theme="light"] .themeSwitch button.on{color:#fff}
+html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.32)}
+
+/* ---- phone / compact (kept last so the scroll fixes win) ---- */
+@media (max-width: 900px) or (orientation: portrait){
+  #app{grid-template-columns:1fr;grid-template-rows:minmax(0,34dvh) minmax(0,1fr);gap:10px;padding:10px}
+  #bar{margin:8px;padding:8px 9px;gap:6px;border-radius:var(--radius-sm)}
+  #bar button{padding:8px 12px;font-size:12px}
+  #side{border-radius:var(--radius);min-height:0}
+  #log{min-height:96px;padding:12px 10px}
+  #log>div{max-width:90%}
+  #lobby{margin:7vh auto;padding:28px 22px;border-radius:var(--radius-lg)}
+  #lobby h1{font-size:30px}
+  .modal{
+    left:0;right:0;bottom:0;top:auto;transform:none;width:100%;max-width:100%;
+    border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+    padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px));
+  }
+  .modal::before{
+    content:'';display:block;width:40px;height:5px;border-radius:999px;
+    background:var(--border);margin:0 auto 12px;flex-shrink:0;
+  }
+  #comfortPanel{border-radius:var(--radius);padding:16px}
+}
+@media (orientation: landscape) and (max-height: 520px){
+  html:not(.device-phone) #bar{margin:6px;padding:6px 8px}
+  html:not(.device-phone) #bar button{padding:7px 10px;font-size:11px}
+  html:not(.device-phone) #lobby{margin:4vh auto;padding:20px}
+}
+
+
+/* ---- FULLSCREEN with the partner visible (ALL devices) -------------------
+   The native fullscreen control fullscreens the bare <video>, which cannot
+   render children -- so nothing could float over it. Our ⛶ fullscreens the
+   #views CONTAINER instead: the film fills it and the partner's camera
+   floats in the corner. Tap the little cam to move it left/right. */
+#fsToggle{position:absolute;right:10px;bottom:10px;z-index:45;width:44px;height:44px;border-radius:50%;font-size:18px;display:flex;align-items:center;justify-content:center;background:rgba(20,14,40,.65);backdrop-filter:blur(10px) saturate(1.5);-webkit-backdrop-filter:blur(10px) saturate(1.5);border:1px solid var(--border);color:#fff;box-shadow:var(--shadow)}
+#fsCam{display:none}
+#views:fullscreen{background:#000}
+#views:fullscreen #player{width:100%;height:100%;object-fit:contain}
+#views:fullscreen #fsToggle{bottom:max(14px,env(safe-area-inset-bottom,0px))}
+#views:fullscreen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
+#views:fullscreen #fsCam.left{right:auto;left:12px}
+#views:-webkit-full-screen{background:#000}
+#views:-webkit-full-screen #player{width:100%;height:100%;object-fit:contain}
+#views:-webkit-full-screen #fsCam{display:block;position:absolute;right:12px;bottom:calc(72px + env(safe-area-inset-bottom,0px));width:clamp(120px,24vmin,280px);aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(196,181,253,.45);box-shadow:0 10px 32px rgba(0,0,0,.55);z-index:60;background:#000}
+#views:-webkit-full-screen #fsCam.left{right:auto;left:12px}
+#fsCam video{width:100%;height:100%;object-fit:cover}
+
+/* ---- PHONE MODE (auto-detected) ------------------------------------------
+   html gets device-phone / device-tablet / device-desktop at boot. Tablets
+   and laptops keep the layout above untouched; everything below applies ONLY
+   to phones. Phone UX = app-like: film pinned on top, ONE section at a time
+   below (Chat / Call / More), switched by a bottom tab bar. */
+.phone-only{display:none}
+html.device-phone .phone-only{display:inline-flex;align-items:center;justify-content:center}
+/* App frame: film • active section • tab bar */
+html.device-phone #app{grid-template-columns:1fr;grid-template-rows:minmax(0,42dvh) minmax(0,1fr) auto;gap:8px;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
+/* Toolbar: ONE finger-sized row that swipes sideways (wrapping stole the
+   film's height before). */
+html.device-phone #bar{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;gap:6px;padding:8px}
+html.device-phone #bar::-webkit-scrollbar{display:none}
+html.device-phone #bar button{flex:0 0 auto;min-height:42px;padding:9px 12px;font-size:12.5px;border-radius:14px}
+html.device-phone #bar input[type="text"]{flex:0 0 auto;min-width:150px;min-height:42px}
+/* Bottom tab bar */
+html.device-phone #phoneTabs{display:flex;gap:8px}
+html.device-phone #phoneTabs button{flex:1;min-height:54px;border-radius:18px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--border);color:var(--text-muted);position:relative}
+html.device-phone #phoneTabs button.active{background:var(--grad);color:#fff;border-color:transparent;box-shadow:var(--shadow)}
+html.device-phone #phoneTabs .tEmoji{font-size:19px;line-height:1}
+html.device-phone #phoneTabs .badge{position:absolute;top:5px;right:16px}
+/* One section at a time. Hidden <video> keeps its stream + audio alive. */
+html.device-phone body:not([data-ptab="call"]) #callStatus,
+html.device-phone body:not([data-ptab="call"]) #videoGrid{display:none}
+html.device-phone body:not([data-ptab="more"]) #queue,
+html.device-phone body:not([data-ptab="more"]) #bookmarks{display:none}
+html.device-phone body:not([data-ptab="chat"]) #chatHead,
+html.device-phone body:not([data-ptab="chat"]) #log,
+html.device-phone body:not([data-ptab="chat"]) #typing,
+html.device-phone body:not([data-ptab="chat"]) #chatForm,
+html.device-phone body:not([data-ptab="chat"]) #emojiPanel{display:none}
+/* CHAT tab: comfortable messaging */
+html.device-phone #log{min-height:150px}
+html.device-phone #chatHead{padding-top:8px;padding-bottom:8px}
+html.device-phone #chatForm input{font-size:16px;min-height:46px} /* 16px: no focus auto-zoom */
+html.device-phone #chatForm button{min-width:46px;min-height:46px}
+html.device-phone #emojiPanel{max-height:132px}
+html.device-phone #log>div{line-height:1.45}
+html.device-phone .msg{max-width:88%}
+/* CALL tab: cameras keep the SAME 16:9 ratio as tablet/laptop -- width
+   drives height via aspect-ratio, no max-height squeeze. The grid scrolls
+   if the two cams don't fit. */
+html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:column;padding:10px;gap:10px;border-bottom:none;overflow-y:auto;min-height:0}
+html.device-phone body[data-ptab="call"] .camBox{width:min(100%,37dvh);align-self:center;aspect-ratio:16/9;max-height:none;min-height:0;flex:0 0 auto}
+html.device-phone #callStatus{padding:6px 10px;font-size:12px}
+/* MORE tab: name/theme card + episodes + bookmarks, roomy */
+html.device-phone #profileCard{display:none}
+html.device-phone body[data-ptab="more"] #profileCard{display:block;padding:12px}
+html.device-phone body[data-ptab="more"] #queue.has{max-height:34dvh}
+html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:26dvh}
+html.device-phone #profileCard input,html.device-phone #profileCard button{min-height:42px}
+html.device-phone .themeSwitch button{min-width:46px;min-height:42px}
+/* The old chat hide/collapse chevron is redundant under the tab bar */
+html.device-phone #chatToggle,html.device-phone #chatReopen{display:none !important}
+
+/* ---- PHONE · LANDSCAPE: film left, active section right, tab rail edge.
+   (Portrait rules above; this block only reshapes the frame.) */
+@media (orientation: landscape){
+html.device-phone #app{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) auto;grid-template-rows:minmax(0,1fr);gap:8px;padding:6px calc(6px + env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) calc(6px + env(safe-area-inset-left,0px))}
+html.device-phone #stage{grid-column:1;grid-row:1;min-height:0}
+html.device-phone #side{grid-column:2;grid-row:1;min-height:0}
+/* vertical tab rail on the right edge, thumb-reachable */
+html.device-phone #phoneTabs{grid-column:3;grid-row:1;flex-direction:column;width:62px;gap:6px}
+html.device-phone #phoneTabs button{flex:1;min-height:0;border-radius:14px;font-size:10px;padding:4px 2px}
+html.device-phone #phoneTabs .tEmoji{font-size:17px}
+html.device-phone #phoneTabs .badge{top:4px;right:8px}
+/* short screen: slimmer toolbar + chrome so the film gets the height */
+html.device-phone #bar{padding:5px 6px;gap:5px}
+html.device-phone #bar button{min-height:38px;padding:7px 10px;font-size:11.5px}
+html.device-phone #bar input[type="text"]{min-height:38px;min-width:130px}
+html.device-phone #log{min-height:80px}
+html.device-phone #chatForm input{min-height:42px}
+html.device-phone #chatForm button{min-width:42px;min-height:42px}
+html.device-phone #emojiPanel{max-height:84px}
+/* Call tab in landscape: side-by-side 16:9, exactly like the laptop panel */
+html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:row;align-items:flex-start}
+html.device-phone body[data-ptab="call"] .camBox{flex:1 1 0;width:auto;aspect-ratio:16/9}
+html.device-phone body[data-ptab="more"] #queue.has{max-height:30dvh}
+html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 }

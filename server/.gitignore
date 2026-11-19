@@ -5,5 +5,7 @@ turn.txt
 link.txt
 server.log
 tunnel.log
+server.pid
+tunnel.pid
 *.backup-*.html
 .backup-*/

@@ -5,83 +5,658 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { convert } = require('./lib/convert');
+const { convert, probePartial, startStreamConvert } = require('./lib/convert');
+const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = require('./lib/subtitles');
+
+const ROOT = __dirname;
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
+const VERSION = '2.10.0-fullscreen-pip';
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-fs.mkdirSync('uploads', { recursive: true });
-fs.mkdirSync('media', { recursive: true });
-app.use(express.static('public'));
-app.use('/media', express.static('media'));
+const uploadsDir = path.join(ROOT, 'uploads');
+const mediaDir = path.join(ROOT, 'media');
+const chatImgDir = path.join(mediaDir, 'chat');
+fs.mkdirSync(uploadsDir, { recursive: true });
+fs.mkdirSync(mediaDir, { recursive: true });
+fs.mkdirSync(chatImgDir, { recursive: true });
+
+app.get('/health', (req, res) => {
+    res.json({
+        ok: true,
+        service: 'together',
+        version: VERSION,
+        rooms: rooms.size,
+        uptime: Math.round(process.uptime()),
+        turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
+        maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3),
+        subtitles: (() => { const w = findWhisper(); return w ? `ready (${path.basename(w.model)})` : 'generator not installed'; })()
+    });
+});
+
+app.get('/vendor/hls.min.js', (req, res) => {
+    res.sendFile(path.join(ROOT, 'node_modules', 'hls.js', 'dist', 'hls.min.js'));
+});
+
+app.use(express.static(path.join(ROOT, 'public')));
+app.use('/media', express.static(mediaDir));
 
 app.get('/link', (req, res) => {
-    try { res.type('text').send(fs.readFileSync('link.txt', 'utf8').trim()); }
+    try { res.type('text').send(fs.readFileSync(path.join(ROOT, 'link.txt'), 'utf8').trim()); }
     catch { res.type('text').send(''); }
 });
 
+// Quota-free public relay: Metered Open Relay "static auth" (REST secret).
+// The secret is published by Metered for the Open Relay Project; credentials
+// minted from it do NOT consume a personal Metered plan quota. Time-limited.
+function openrelayRest() {
+    const secret = 'openrelayprojectsecret';
+    const username = Math.floor(Date.now() / 1000) + 86400 + ':together';
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    return {
+        urls: [
+            'turn:staticauth.openrelay.metered.ca:80',
+            'turn:staticauth.openrelay.metered.ca:443',
+            'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+            'turns:staticauth.openrelay.metered.ca:443?transport=tcp'
+        ],
+        username, credential
+    };
+}
+
 app.get('/ice', (req, res) => {
+    const clean = [];
     try {
-        const data = fs.readFileSync('turn.txt', 'utf8').trim();
-        if (data) { JSON.parse(data); return res.type('json').send(data); }
+        const data = fs.readFileSync(path.join(ROOT, 'turn.txt'), 'utf8').trim();
+        if (data) {
+            const parsed = JSON.parse(data);
+            if (Array.isArray(parsed)) {
+                for (const e of parsed) {
+                    if (!e || !e.urls) continue;
+                    const entry = {
+                        urls: Array.isArray(e.urls) ? e.urls.map((u) => String(u).trim()) : String(e.urls).trim()
+                    };
+                    // Trim stray whitespace (a trailing space in the credential
+                    // silently breaks TURN authentication).
+                    if (e.username != null) entry.username = String(e.username).trim();
+                    if (e.credential != null) entry.credential = String(e.credential).trim();
+                    const ph = /xxxx|your_|placeholder/i.test(entry.username || '') || /xxx|your_|placeholder/i.test(entry.credential || '');
+                    if (ph) continue; // skip redacted / example placeholders
+                    clean.push(entry);
+                }
+            }
+        }
     } catch {}
-    res.json([{ urls: 'stun:stun.l.google.com:19302' }]);
+    // User TURN first (if quota remains), then the quota-free public relay, then STUN.
+    res.json(clean.concat([openrelayRest(), { urls: 'stun:stun.l.google.com:19302' }]));
 });
 
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 20 * 1024 ** 3 } });
-const rooms = {};
-const roomState = {};
+// Maximum room video upload. Override with MAX_UPLOAD_GB env if ever needed.
+const MAX_UPLOAD_BYTES = Math.max(1, Math.round((Number(process.env.MAX_UPLOAD_GB) || 5) * 1024 ** 3));
+const upload = multer({ dest: uploadsDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
+const chatImgUpload = multer({ dest: uploadsDir, limits: { fileSize: 5 * 1024 ** 2 } });
+const rooms = new Map();
+const roomState = new Map();
+const roomBookmarks = new Map();
 let queue = Promise.resolve();
+rooms.set('TOGETHER', new Map());
 
-app.post('/upload/:room', upload.single('video'), (req, res) => {
-    const room = req.params.room;
-    if (!rooms[room]) { if (req.file) fs.unlink(req.file.path, () => {}); return res.status(403).json({ error: 'Room not found' }); }
-    if (!req.file) return res.status(400).json({ error: 'No file' });
+function normalizeRoom(value) {
+    const room = String(value || '').trim().toUpperCase();
+    return /^[A-Z0-9]{4,12}$/.test(room) ? room : null;
+}
+function normalizeCid(value) {
+    const cid = String(value || '').trim();
+    return /^[A-Za-z0-9_-]{8,64}$/.test(cid) ? cid : null;
+}
+
+// Every media folder a room creates, so "clear from room" can delete them all.
+// Last-resort safety net. Killing a transcoder when a video is cleared closes
+// its pipes; a late write can still surface EPIPE / write-after-end. Those are
+// expected and must never take the whole room server down. Anything else is a
+// real bug and still crashes loudly so it can be diagnosed.
+const BENIGN_STREAM_ERRORS = new Set(['EPIPE', 'ERR_STREAM_DESTROYED',
+    'ERR_STREAM_WRITE_AFTER_END', 'ERR_STREAM_ALREADY_FINISHED', 'ECANCELED']);
+process.on('uncaughtException', (err) => {
+    if (err && BENIGN_STREAM_ERRORS.has(err.code)) {
+        console.warn('Ignored transient stream error:', err.code);
+        return;
+    }
+    console.error('Fatal error:', err && err.stack || err);
+    process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+    if (err && BENIGN_STREAM_ERRORS.has(err.code)) {
+        console.warn('Ignored transient stream rejection:', err.code);
+        return;
+    }
+    console.error('Unhandled rejection:', err && err.stack || err);
+});
+
+const roomMedia = new Map(); // room -> Set(mediaId)
+// Conversions that outlive their upload session (post-finalize fallback
+// convert, or a live tail still encoding after the last slice). Without this
+// registry, /delete could not reach that ffmpeg: the "deleted" file finished
+// converting minutes later, re-announced itself to the room, kept its 500 MB
+// temp file busy, and blocked the next upload behind it in the queue -- the
+// exact "have to restart the server to clear it" failure.
+const roomJobs = new Map(); // room -> Set({ cancel() })
+function trackJob(room, job) {
+    if (!roomJobs.has(room)) roomJobs.set(room, new Set());
+    roomJobs.get(room).add(job);
+}
+function untrackJob(room, job) {
+    const set = roomJobs.get(room);
+    if (set) { set.delete(job); if (!set.size) roomJobs.delete(room); }
+}
+
+// ---- Automatic subtitles --------------------------------------------------
+// Movies that come with a subtitle track keep it (extracted during
+// conversion / right after a live upload). Anything without one gets
+// subtitles generated locally by whisper.cpp on its own queue, so playback
+// starts immediately and the track switches on for both viewers when ready.
+// Jobs are registered in roomJobs, so deleting the video cancels them too.
+let subsQueue = Promise.resolve();
+function hlsDuration(playlistFile) {
+    try {
+        return fs.readFileSync(playlistFile, 'utf8').split('\n')
+            .reduce((t, l) => { const m = l.match(/^#EXTINF:([\d.]+)/); return m ? t + Number(m[1]) : t; }, 0);
+    } catch { return 0; }
+}
+function startSubtitleJob(room, id, name) {
+    const outDir = path.join(mediaDir, id);
+    const outVtt = path.join(outDir, 'subs.vtt');
+    const playlistFile = path.join(outDir, 'index.m3u8');
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
+    subsQueue = subsQueue.then(async () => {
+        if (job.cancelled || !fs.existsSync(playlistFile)) return; // deleted meanwhile
+        if (!subtitlesAvailable()) {
+            io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles, and the subtitle generator (whisper.cpp) isn't installed on this server yet.` });
+            return;
+        }
+        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — live English subtitles are being generated. They'll start appearing on screen in a moment and fill in as the movie is transcribed.` });
+        io.to(room).emit('subs', { state: 'start', name });
+        // Real-time mode: whisper hands us each finished line as it works.
+        // We grow subs.vtt on disk and re-announce it every few seconds (with
+        // a cache-busting ?r=) so both phones pick up the new lines while the
+        // movie is playing -- no waiting for the whole transcription.
+        const url = `/media/${id}/index.m3u8`;
+        const subs = `/media/${id}/subs.vtt`;
+        const cues = [];
+        let announcedPartial = false, lastPush = 0, rev = 0;
+        const pushPartial = (force) => {
+            if (job.cancelled || !cues.length) return;
+            const now = Date.now();
+            if (!force && announcedPartial && now - lastPush < 8000) return;
+            lastPush = now;
+            const vtt = 'WEBVTT\n\n' + cues.map((c) => `${c.start} --> ${c.end}\n${c.text}`).join('\n\n') + '\n';
+            try { fs.writeFileSync(outVtt, vtt); } catch { return; }
+            const st = roomState.get(room);
+            if (st && st.url === url) st.subs = subs; // late joiners get them too
+            if (!announcedPartial) {
+                announcedPartial = true;
+                io.to(room).emit('chat', { name: 'System', text: `Live English subtitles for "${name}" are on ✅ (filling in as it transcribes)` });
+            }
+            io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
+        };
+        try {
+            await generateSubs(playlistFile, outVtt, {
+                duration: hlsDuration(playlistFile),
+                onProgress: (p) => io.to(room).emit('subs', { state: 'progress', percent: p, name }),
+                onSegment: (cue) => { cues.push(cue); pushPartial(false); },
+                job,
+            });
+            if (job.cancelled) { fs.unlink(outVtt, () => {}); return; }
+            const st = roomState.get(room);
+            if (st && st.url === url) st.subs = subs;
+            io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
+            io.to(room).emit('subs', { state: 'ready', name });
+            io.to(room).emit('chat', { name: 'System', text: `English subtitles for "${name}" are complete ✅` });
+        } catch (e) {
+            if (!job.cancelled && !e.cancelled) {
+                io.to(room).emit('subs', { state: 'error', name });
+                io.to(room).emit('chat', { name: 'System', text: `Could not generate subtitles for "${name}": ${e.message}` });
+            }
+        }
+    }).catch(() => {}).finally(() => untrackJob(room, job));
+}
+
+// After a live (watch-while-uploading) movie finishes: the original file was
+// kept for this moment -- pull its embedded subtitle track if it has one,
+// otherwise queue generation. Either way the source file is removed after.
+async function finishLiveSubtitles(s) {
+    const outVtt = path.join(s.outDir, 'subs.vtt');
+    const url = `/media/${s.mediaId}/index.m3u8`;
+    try {
+        const found = s.tmp && fs.existsSync(s.tmp) && await extractEmbedded(s.tmp, outVtt);
+        if (found && !s.cancelled) {
+            const subs = `/media/${s.mediaId}/subs.vtt`;
+            const st = roomState.get(s.room);
+            if (st && st.url === url) st.subs = subs;
+            io.to(s.room).emit('player', { type: 'subs', url: subs, target: url });
+            io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" came with subtitles — switched on ✅` });
+        } else if (!s.cancelled) {
+            startSubtitleJob(s.room, s.mediaId, s.name);
+        }
+    } catch {}
+    if (s.tmp) fs.unlink(s.tmp, () => {});
+}
+function trackMedia(room, id) {
+    if (!roomMedia.has(room)) roomMedia.set(room, new Set());
+    roomMedia.get(room).add(id);
+}
+
+// Shared pipeline: takes a fully-uploaded temp file and converts it to HLS.
+function startProcessing(room, tmp, name) {
     const id = crypto.randomBytes(12).toString('hex');
-    const outDir = path.join('media', id);
+    const outDir = path.join(mediaDir, id);
     fs.mkdirSync(outDir, { recursive: true });
-    const name = req.file.originalname;
-    const tmp = req.file.path;
-    res.json({ id });
+    trackMedia(room, id);
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
     io.to(room).emit('processing', { name, percent: 0 });
     queue = queue
-        .then(() => convert(tmp, outDir, (percent) => io.to(room).emit('processing', { name, percent })))
+        .then(() => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+            return convert(tmp, outDir, (percent) => { if (!job.cancelled) io.to(room).emit('processing', { name, percent }); }, job);
+        })
         .then(({ hasSubs }) => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
             const url = `/media/${id}/index.m3u8`;
             const subs = hasSubs ? `/media/${id}/subs.vtt` : null;
-            roomState[room] = { url, subs };
+            roomState.set(room, { url, subs });
             io.to(room).emit('player', { type: 'load', url, subs });
             io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
+            if (!hasSubs) startSubtitleJob(room, id, name); // movie came without subtitles -> make them
         })
         .catch((err) => {
+            if (job.cancelled || err.cancelled) {
+                // Deleted while converting: remove the half-written output
+                // quietly (the ffmpeg has exited by the time we get here, so
+                // nothing recreates the folder) and clear the progress bar.
+                fs.rm(outDir, { recursive: true, force: true }, () => {});
+                io.to(room).emit('processing', { name, percent: -1 });
+                return;
+            }
             io.to(room).emit('chat', { name: 'System', text: 'Problem: ' + err.message });
             io.to(room).emit('processing', { name, percent: -1 });
         })
-        .finally(() => fs.unlink(tmp, () => {}));
+        .finally(() => { untrackJob(room, job); fs.unlink(tmp, () => {}); });
+    return id;
+}
+
+// Legacy single-request upload (fine on localhost; tunnels cap request bodies).
+app.post('/upload/:room', (req, res, next) => {
+    upload.single('video')(req, res, (err) => {
+        if (err) {
+            const tooBig = err.code === 'LIMIT_FILE_SIZE';
+            return res.status(tooBig ? 413 : 400).json({
+                error: tooBig ? 'File too large (max ' + Math.round(MAX_UPLOAD_BYTES / 1024 ** 3) + ' GB).' : 'Upload failed: ' + err.message
+            });
+        }
+        next();
+    });
+}, (req, res) => {
+    const room = normalizeRoom(req.params.room);
+    if (!room || !rooms.has(room)) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ error: 'Room not found' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No file' });
+    res.json({ id: startProcessing(room, req.file.path, req.file.originalname) });
 });
+
+// ---- Progressive playback: watch while the file is still uploading ----
+// Slices are appended to the temp file AND piped into ffmpeg, which writes a
+// growing HLS playlist. As soon as the first segments exist both peers are
+// told to load it from position 0 at the same wall-clock moment, so MKV/large
+// files start together instead of waiting for the whole upload.
+function feedStdin(ff, buf) {
+    return new Promise((resolve) => {
+        if (!ff || ff.killed || !ff.stdin || ff.stdin.destroyed || ff.stdin.writableEnded) return resolve(false);
+        let done = false, timer = null;
+        const finish = (ok) => {
+            if (done) return;
+            done = true;
+            if (timer) clearTimeout(timer);
+            try { ff.stdin.removeListener('error', onErr); ff.removeListener('close', onClose); } catch {}
+            resolve(ok);
+        };
+        const onErr = () => finish(false);
+        const onClose = () => finish(false);
+        // Backpressure: resolving on the write callback slows slice POSTs to
+        // ffmpeg's pace instead of buffering the movie in RAM. But it must
+        // NEVER hang the upload -- if ffmpeg wedges or dies we resolve false
+        // and the caller falls back to converting after the upload finishes.
+        timer = setTimeout(() => finish(false), 20000);
+        if (timer.unref) timer.unref();
+        ff.stdin.once('error', onErr);
+        ff.once('close', onClose);
+        try { ff.stdin.write(buf, () => finish(true)); } catch { finish(false); }
+    });
+}
+
+function announceLive(s) {
+    if (s.cancelled || s.announced || !s.outDir) return;
+    const playlist = path.join(s.outDir, 'index.m3u8');
+    try {
+        const txt = fs.readFileSync(playlist, 'utf8');
+        const segments = (txt.match(/#EXTINF:/g) || []).length;
+        if (segments < 1) return; // hls.js can start here and keep polling for more
+        s.announced = true;
+        if (s.poller) { clearInterval(s.poller); s.poller = null; }
+        const url = `/media/${s.mediaId}/index.m3u8`;
+        roomState.set(s.room, { url, subs: null, live: true });
+        trackMedia(s.room, s.mediaId);
+        // Same start instant for both peers -> simultaneous start.
+        io.to(s.room).emit('player', { type: 'load', url, subs: null, live: true, startAt: Date.now() + 3000 });
+        io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" is playing while it uploads. Both of you start together.` });
+    } catch {}
+}
+
+async function tryStartLive(s, endOffset) {
+    let info;
+    try { info = await probePartial(s.tmp); } catch { return; } // not enough data yet; retry on a later slice
+    const v = (info.streams || []).find((x) => x.codec_type === 'video');
+    const a = (info.streams || []).find((x) => x.codec_type === 'audio');
+    if (!v) { s.live = false; return; }
+    const copyV = v.codec_name === 'h264';
+    const copyA = !!a && a.codec_name === 'aac' && a.channels <= 2;
+    s.mediaId = crypto.randomBytes(12).toString('hex');
+    s.outDir = path.join(mediaDir, s.mediaId);
+    try { fs.mkdirSync(s.outDir, { recursive: true }); } catch { s.live = false; return; }
+    const ff = startStreamConvert(s.outDir, { copyV, copyA });
+    s.ff = ff;
+    s.live = true;
+    ff.on('error', () => { s.live = false; s.ff = null; });
+    ff.on('close', (code) => {
+        s.ffExited = true;
+        if (code === 0 && s.outDir && !s.cancelled) {
+            // Turn the growing EVENT playlist into a finished VOD.
+            const pl = path.join(s.outDir, 'index.m3u8');
+            try {
+                const txt = fs.readFileSync(pl, 'utf8');
+                if (!txt.includes('#EXT-X-ENDLIST')) fs.appendFileSync(pl, '#EXT-X-ENDLIST\n');
+            } catch {}
+            announceLive(s);
+            io.to(s.room).emit('player', { type: 'vod', url: `/media/${s.mediaId}/index.m3u8` });
+            if (s.finalized) finishLiveSubtitles(s); // embedded subs or generate
+        } else if (!s.finalized) {
+            s.live = false; s.ff = null; // fall back to converting the whole file at the end
+        } else if (s.tmp) {
+            fs.unlink(s.tmp, () => {}); // finalized but killed/failed: drop the kept source
+        }
+    });
+    s.poller = setInterval(() => announceLive(s), 700);
+    s.poller.unref();
+    // Feed everything received so far, in order, before later slices.
+    // Read only the bytes received so far, not the whole temp file: it can
+    // already be larger, and slurping hundreds of MB would OOM a phone.
+    let prefix;
+    try {
+        const rfd = fs.openSync(s.tmp, 'r');
+        try { prefix = Buffer.allocUnsafe(endOffset); fs.readSync(rfd, prefix, 0, endOffset, 0); }
+        finally { fs.closeSync(rfd); }
+    } catch { s.live = false; stopLive(s); return; }
+    if (s.cancelled) { stopLive(s); return; }
+    const ok = await feedStdin(ff, prefix);
+    if (!ok) { s.live = false; stopLive(s); }
+}
+
+function stopLive(s) {
+    s.cancelled = true;
+    if (s.poller) { clearInterval(s.poller); s.poller = null; }
+    const ff = s.ff;
+    s.ff = null;
+    if (!ff) return;
+    // Killing ffmpeg closes the pipe; any pending write then emits EPIPE.
+    // Keep a listener attached or Node kills the whole server process.
+    try { ff.stdin.on('error', () => {}); } catch {}
+    try { ff.stdin.end(); } catch {}
+    try { ff.kill('SIGKILL'); } catch {}
+}
+
+// Chunked upload: small slices pass through Cloudflare's ~100 MB body cap.
+// Chunks arrive in order and are appended to a temp file; the last chunk
+// finalizes the stream. /upload-status lets a client resume after a dropped
+// request without duplicating data.
+const UPLOAD_CHUNK_MAX = 96 * 1024 ** 2;
+const chunkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_CHUNK_MAX } });
+const uploadSessions = new Map(); // uid -> { fd, tmp, room, name, totalSize, totalChunks, next, bytes, last }
+
+app.get('/upload-status/:room/:uid', (req, res) => {
+    const room = normalizeRoom(req.params.room);
+    const uid = String(req.params.uid || '');
+    if (!room || !/^[a-f0-9]{24}$/.test(uid)) return res.status(400).json({ error: 'Bad request' });
+    const s = uploadSessions.get(uid);
+    if (!s || s.room !== room) return res.json({ next: 0 });
+    res.json({ next: s.next, total: s.totalChunks });
+});
+
+app.post('/upload-chunk/:room', (req, res) => {
+    chunkUpload.single('chunk')(req, res, (err) => {
+        if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Chunk rejected: ' + err.message });
+        const room = normalizeRoom(req.params.room);
+        if (!room || !rooms.has(room)) return res.status(403).json({ error: 'Room not found' });
+        const b = req.body || {};
+        const uid = String(b.uid || '');
+        const index = Number(b.index), totalChunks = Number(b.totalChunks), totalSize = Number(b.totalSize);
+        const name = String(b.name || 'video').slice(0, 200);
+        if (!/^[a-f0-9]{24}$/.test(uid)) return res.status(400).json({ error: 'Bad upload id' });
+        if (!req.file || !req.file.buffer || !req.file.buffer.length) return res.status(400).json({ error: 'No chunk data' });
+        if (!Number.isInteger(index) || !Number.isInteger(totalChunks) || index < 0 || totalChunks < 1 || totalChunks > 100000 || index >= totalChunks)
+            return res.status(400).json({ error: 'Bad chunk index' });
+        if (!Number.isFinite(totalSize) || totalSize < 1) return res.status(400).json({ error: 'Bad file size' });
+        if (totalSize > MAX_UPLOAD_BYTES)
+            return res.status(413).json({ error: 'File too large (max ' + Math.round(MAX_UPLOAD_BYTES / 1024 ** 3) + ' GB).' });
+        let s = uploadSessions.get(uid);
+        if (!s) {
+            if (index !== 0) return res.status(409).json({ error: 'Upload must start at chunk 0', next: 0 });
+            const tmp = path.join(uploadsDir, uid + '.part');
+            let fd;
+            try { fd = fs.openSync(tmp, 'w'); } catch (e) { return res.status(500).json({ error: 'Cannot open temp file: ' + e.message }); }
+            s = { fd, tmp, room, name, totalSize, totalChunks, next: 0, bytes: 0, last: Date.now(),
+                  live: null, ff: null, mediaId: null, outDir: null, announced: false, chain: null, poller: null, finalized: false };
+            uploadSessions.set(uid, s);
+        }
+        s.last = Date.now();
+        if (s.room !== room || s.totalSize !== totalSize || s.totalChunks !== totalChunks) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(409).json({ error: 'Upload metadata changed; start over', next: 0 });
+        }
+        if (index !== s.next) return res.status(409).json({ error: 'Unexpected chunk', next: s.next });
+        if (s.bytes + req.file.buffer.length > s.totalSize) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(413).json({ error: 'More data than declared file size' });
+        }
+        try { fs.writeSync(s.fd, req.file.buffer); } catch (e) {
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            uploadSessions.delete(uid);
+            return res.status(500).json({ error: 'Disk write failed (storage full?): ' + e.message });
+        }
+        const buf = req.file.buffer;
+        s.bytes += buf.length;
+        const endOffset = s.bytes;
+        s.next++;
+        const isFinal = s.next === s.totalChunks;
+        // Serialize progressive-feed work so slices reach ffmpeg in order and
+        // the probe's prefix never overlaps a later slice.
+        s.chain = (s.chain || Promise.resolve()).then(async () => {
+            if (s.cancelled) return;
+            if (s.live === null) {
+                // Keep trying as more of the file arrives (a partial container may
+                // not be readable yet). Give up after 8 attempts -> convert at end.
+                s.probeAttempts = (s.probeAttempts || 0) + 1;
+                if (s.probeAttempts > 8) s.live = false;
+                else await tryStartLive(s, endOffset);
+            } else if (s.live && s.ff) {
+                const ok = await feedStdin(s.ff, buf);
+                if (!ok) { s.live = false; stopLive(s); } // upload continues; convert at the end
+            }
+        }).catch(() => { s.live = false; });
+        s.chain.then(async () => {
+            if (s.cancelled) return res.status(409).json({ error: 'Upload was cancelled', next: 0 });
+            if (!isFinal) return res.json({ ok: true, next: s.next, live: !!s.announced });
+            try { fs.closeSync(s.fd); } catch {}
+            uploadSessions.delete(uid);
+            if (s.bytes !== s.totalSize) {
+                stopLive(s);
+                fs.unlink(s.tmp, () => {});
+                return res.status(400).json({ error: 'Size mismatch after final chunk' });
+            }
+            s.finalized = true;
+            if (s.live && s.ff) {
+                // Finish the stream we have already been playing. The session
+                // leaves uploadSessions here, but ffmpeg may keep encoding the
+                // tail for a while -- register a job so /delete can still
+                // reach it (otherwise the file came back after deletion).
+                announceLive(s); // poller keeps trying until segments exist
+                const tail = s.ff;
+                const job = { cancel: () => {
+                    stopLive(s);
+                    const mop = () => { if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {}); };
+                    if (tail && !s.ffExited) tail.once('close', mop); else mop();
+                } };
+                trackJob(room, job);
+                if (s.ffExited) untrackJob(room, job);
+                else tail.once('close', () => untrackJob(room, job));
+                try { tail.stdin.end(); } catch {}
+                // NOTE: s.tmp is kept until ffmpeg closes -- finishLiveSubtitles
+                // checks it for an embedded subtitle track, then removes it.
+                trackMedia(room, s.mediaId);
+                return res.json({ id: s.mediaId, live: true });
+            }
+            stopLive(s);
+            if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
+            return res.json({ id: startProcessing(room, s.tmp, s.name) });
+        }).catch((e) => res.status(500).json({ error: 'Upload failed: ' + e.message }));
+    });
+});
+
+// Abandon stale chunked uploads after 30 minutes so temp files don't pile up.
+setInterval(() => {
+    const now = Date.now();
+    for (const [uid, s] of uploadSessions) {
+        if (now - s.last > 30 * 60 * 1000) {
+            stopLive(s);
+            try { fs.closeSync(s.fd); } catch {}
+            fs.unlink(s.tmp, () => {});
+            if (s.outDir && !s.announced) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
+            uploadSessions.delete(uid);
+        }
+    }
+}, 60 * 1000).unref();
+
+// Size-capped chat image / GIF upload (feature 11). Returns a served URL.
+app.post('/chatimg/:room', (req, res) => {
+    chatImgUpload.single('image')(req, res, (err) => {
+        if (err) {
+            const code = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+            return res.status(code).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Image too large (max 5 MB).' : 'Upload failed.' });
+        }
+        handleChatImg(req, res);
+    });
+});
+function handleChatImg(req, res) {
+    const room = normalizeRoom(req.params.room);
+    if (!room || !rooms.has(room)) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ error: 'Room not found' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No image' });
+    const mime = String(req.file.mimetype || '');
+    if (!/^image\/(png|jpe?g|gif|webp)$/.test(mime)) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(415).json({ error: 'Only PNG / JPG / GIF / WebP images are allowed.' });
+    }
+    const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : mime.includes('webp') ? 'webp' : 'jpg';
+    const id = crypto.randomBytes(10).toString('hex');
+    const dest = path.join(chatImgDir, `${id}.${ext}`);
+    fs.rename(req.file.path, dest, (err) => {
+        if (err) return res.status(500).json({ error: 'Could not save image' });
+        res.json({ url: `/media/chat/${id}.${ext}` });
+    });
+}
 
 app.delete('/delete/:room', (req, res) => {
-    const room = req.params.room;
-    if (!rooms[room] || !roomState[room]) return res.status(404).json({ error: 'No active video to delete.' });
-    const mediaId = roomState[room].url.split('/')[2];
-    fs.rm(path.join('media', mediaId), { recursive: true, force: true }, () => {});
-    delete roomState[room];
+    const room = normalizeRoom(req.params.room);
+    if (!room || !rooms.has(room)) return res.status(404).json({ error: 'Room not found.' });
+    const ids = new Set(roomMedia.get(room) || []);
+    const state = roomState.get(room);
+    const currentId = String((state && state.url) || '').split('/')[2];
+    if (/^[a-f0-9]{24}$/.test(currentId)) ids.add(currentId);
+
+    // Cancel any upload still running for this room and drop its temp slices.
+    let cancelled = 0;
+    for (const [uid, s] of uploadSessions) {
+        if (s.room !== room) continue;
+        stopLive(s);
+        try { fs.closeSync(s.fd); } catch {}
+        fs.unlink(s.tmp, () => {});
+        if (s.mediaId) ids.add(s.mediaId);
+        if (s.outDir) ids.add(path.basename(s.outDir));
+        uploadSessions.delete(uid);
+        cancelled++;
+    }
+
+    // Cancel conversions that outlived their upload session (post-finalize
+    // fallback convert or a live tail still encoding). This is what used to
+    // require a server restart.
+    for (const job of roomJobs.get(room) || []) { try { job.cancel(); } catch {} cancelled++; }
+    roomJobs.delete(room);
+
+    if (!ids.size && !state && !cancelled) return res.status(404).json({ error: 'No active video to delete.' });
+
+    // Delete every media folder this room created (current + playlist history).
+    let removed = 0;
+    for (const id of ids) {
+        if (!/^[a-f0-9]{24}$/.test(id)) continue;
+        fs.rm(path.join(mediaDir, id), { recursive: true, force: true }, () => {});
+        removed++;
+    }
+    // Sweep orphaned partial uploads (no live session owns them any more).
+    try {
+        for (const f of fs.readdirSync(uploadsDir)) {
+            if (!f.endsWith('.part')) continue;
+            if (uploadSessions.has(f.slice(0, -5))) continue;
+            fs.unlink(path.join(uploadsDir, f), () => {});
+        }
+    } catch {}
+    roomMedia.delete(room);
+    roomState.delete(room);
     io.to(room).emit('player', { type: 'delete' });
-    io.to(room).emit('chat', { name: 'System', text: 'The video has been removed.' });
-    res.json({ ok: true });
+    io.to(room).emit('chat', { name: 'System', text: `Cleared from the room and deleted from the server (${removed} item${removed === 1 ? '' : 's'}).` });
+    res.json({ ok: true, removed, cancelled });
 });
 
-rooms['TOGETHER'] = new Map();
 io.on('connection', (s) => {
-    s.on('join', ({ room, create, cid }, cb) => {
-        if (!room || !cid) return cb({ error: 'Missing room code' });
-        if (!rooms[room]) {
+    s.on('join', (payload, cb) => {
+        if (typeof cb !== 'function') return;
+        const room = normalizeRoom(payload && payload.room);
+        const cid = normalizeCid(payload && payload.cid);
+        const create = Boolean(payload && payload.create);
+        if (!room || !cid) return cb({ error: 'Missing or invalid room code' });
+
+        let created = false;
+        if (!rooms.has(room)) {
             if (!create) return cb({ error: 'Room not found. Ask your partner to create it first.' });
-            rooms[room] = new Map();
+            rooms.set(room, new Map());
+            created = true;
         }
-        const m = rooms[room];
+        const m = rooms.get(room);
         if (!m.has(cid) && m.size >= 2) return cb({ error: 'Room is full (max 2 people).' });
+
         const oldId = m.get(cid);
         if (oldId && oldId !== s.id) {
             const old = io.sockets.sockets.get(oldId);
@@ -92,6 +667,7 @@ io.on('connection', (s) => {
         s.data.room = room;
         s.data.cid = cid;
         if (!s.data.name) s.data.name = 'Guest';
+        console.log('[room] join room=' + room + ' peers=' + m.size + (created ? ' (created)' : ''));
 
         let peerName = null;
         for (const [otherCid, otherSockId] of m) {
@@ -101,9 +677,12 @@ io.on('connection', (s) => {
             }
         }
 
-        cb({ url: roomState[room]?.url || null, subs: roomState[room]?.subs || null, peerName });
+        const state = roomState.get(room) || {};
+        cb({ ok: true, room, created, url: state.url || null, subs: state.subs || null, peerName });
+        s.emit('bookmarks', { list: roomBookmarks.get(room) || [] });
 
         if (m.size === 2) {
+            console.log('[room] ready (2 peers) room=' + room + ' — starting WebRTC negotiation');
             s.emit('ready', { polite: true });
             s.to(room).emit('ready', { polite: false });
         }
@@ -115,26 +694,99 @@ io.on('connection', (s) => {
         s.to(s.data.room).emit('peer-name', { name: s.data.name });
     });
 
-    ['signal', 'chat', 'screen-start', 'screen-stop', 'player', 'react', 'queue'].forEach((ev) =>
-        s.on(ev, (d) => s.data.room && s.to(s.data.room).emit(ev, d))
+    ['signal', 'chat', 'screen-start', 'screen-stop', 'player', 'react', 'queue', 'typing', 'reaction'].forEach((ev) =>
+        s.on(ev, (d) => {
+            if (!s.data.room) return;
+            if (ev === 'signal') {
+                const k = d && d.description ? 'sdp:' + d.description.type : (d && d.candidate ? 'ice-candidate' : '?');
+                console.log('[signal] room=' + s.data.room + ' ' + k);
+            }
+            s.to(s.data.room).emit(ev, d);
+        })
     );
+
+    // One-tap call restart: tell BOTH peers to rebuild the peer connection.
+    s.on('call-restart', () => {
+        if (s.data.room) io.to(s.data.room).emit('call-restart');
+    });
+
+    // Synced 3-2-1 countdown (feature 6): broadcast to BOTH peers incl. sender.
+    s.on('countdown', (d) => {
+        if (!s.data.room) return;
+        const seconds = Math.min(10, Math.max(1, Number(d && d.seconds) || 3));
+        io.to(s.data.room).emit('countdown', { seconds, by: s.data.name || 'Partner' });
+    });
+
+    // Shared timestamp bookmarks (feature 8), stored per room on the server.
+    s.on('bookmark-add', (d) => {
+        const r = s.data.room;
+        if (!r) return;
+        const time = Number(d && d.time);
+        if (!Number.isFinite(time) || time < 0) return;
+        const label = String((d && d.label) || 'Moment').slice(0, 60);
+        const list = roomBookmarks.get(r) || [];
+        if (list.length >= 100) list.shift();
+        list.push({ id: crypto.randomBytes(6).toString('hex'), time, label, by: s.data.name || 'Guest' });
+        list.sort((a, b) => a.time - b.time);
+        roomBookmarks.set(r, list);
+        io.to(r).emit('bookmarks', { list });
+    });
+    s.on('bookmark-remove', (d) => {
+        const r = s.data.room;
+        if (!r) return;
+        const list = (roomBookmarks.get(r) || []).filter((b) => b.id !== (d && d.id));
+        roomBookmarks.set(r, list);
+        io.to(r).emit('bookmarks', { list });
+    });
 
     s.on('disconnect', () => {
         const r = s.data.room;
-        if (!r || !rooms[r]) return;
-        if (rooms[r].get(s.data.cid) === s.id) {
-            rooms[r].delete(s.data.cid);
+        if (!r || !rooms.has(r)) return;
+        const m = rooms.get(r);
+        if (m.get(s.data.cid) === s.id) {
+            m.delete(s.data.cid);
+            console.log('[room] leave room=' + r + ' peers=' + m.size);
             s.to(r).emit('peer-left');
         }
     });
 });
 
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
     const week = 7 * 24 * 3600 * 1000;
-    for (const d of fs.readdirSync('media')) {
-        const p = path.join('media', d);
+    let entries = [];
+    try { entries = fs.readdirSync(mediaDir); } catch { return; }
+    for (const d of entries) {
+        if (d === 'chat') continue;
+        const p = path.join(mediaDir, d);
         try { if (Date.now() - fs.statSync(p).mtimeMs > week) fs.rmSync(p, { recursive: true, force: true }); } catch {}
     }
+    try {
+        for (const f of fs.readdirSync(chatImgDir)) {
+            const p = path.join(chatImgDir, f);
+            try { if (Date.now() - fs.statSync(p).mtimeMs > week) fs.rmSync(p, { force: true }); } catch {}
+        }
+    } catch {}
 }, 3600 * 1000);
+cleanupTimer.unref();
 
-server.listen(process.env.PORT || 3000, () => console.log('Together is running on http://localhost:3000'));
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Stop the old Together server or set PORT to another port.`);
+    } else {
+        console.error('Server error:', err.message);
+    }
+    process.exit(1);
+});
+
+server.listen(PORT, HOST, () => {
+    console.log(`Together ${VERSION} is running on http://localhost:${PORT}`);
+});
+
+function shutdown() {
+    clearInterval(cleanupTimer);
+    io.close();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
