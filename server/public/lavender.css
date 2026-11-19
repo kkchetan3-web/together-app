@@ -80,8 +80,6 @@ button.on{background:var(--danger);color:#fff;border-color:transparent}
 #moreMenu{position:absolute;right:10px;bottom:64px;z-index:80;display:flex;flex-direction:column;gap:6px;padding:10px;width:min(300px,calc(100vw - 24px));max-height:min(60vh,430px);overflow-y:auto;background:rgba(24,18,46,.96);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
 #moreMenu[hidden]{display:none}
 #moreMenu button{padding:10px 12px;font-size:12.5px;text-align:left;width:100%}
-#moreMenu .mmRow{display:flex;gap:6px}
-#moreMenu .mmRow input[type="text"]{flex:1;min-width:0;padding:9px 12px;font-size:12px}
 html[data-theme="light"] #moreMenu{background:rgba(255,255,255,.95)}
 #upStatus{font-size:11px;color:var(--accent-2);padding:0 4px}
 #fileName{font-size:11px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
