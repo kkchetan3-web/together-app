@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v50 : phone redesign (bottom tabs: Chat/Call/More) + subtitles readable without fullscreen -->
+<!-- together-ui v51 : phone landscape layout (film left · section right · tab rail) + true 16:9 call cameras -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -281,13 +281,16 @@ body{--tscale:1}
 #typing{font-size:calc(11px*var(--tscale))}
 #queue .item,#bookmarks .bitem{font-size:calc(12px*var(--tscale))}
 @media (orientation: landscape) and (max-height: 520px){
-#app{grid-template-columns:1fr 300px;gap:8px;padding:8px}
-#profileCard{padding:8px}
-#videoGrid{padding:6px}
-.camBox{max-height:30dvh;min-height:80px}
-#bar{padding:4px 6px;gap:4px}
-#bar button{padding:6px 8px;font-size:11px}
-#lobby{margin:4vh auto;padding:18px}
+/* Scoped to non-phones: phones get their own landscape layout further down.
+   (This block once applied to phones too and its 2-column grid collided
+   with the phone tab layout -> the landscape glitches.) */
+html:not(.device-phone) #app{grid-template-columns:1fr 300px;gap:8px;padding:8px}
+html:not(.device-phone) #profileCard{padding:8px}
+html:not(.device-phone) #videoGrid{padding:6px}
+html:not(.device-phone) .camBox{max-height:30dvh;min-height:80px}
+html:not(.device-phone) #bar{padding:4px 6px;gap:4px}
+html:not(.device-phone) #bar button{padding:6px 8px;font-size:11px}
+html:not(.device-phone) #lobby{margin:4vh auto;padding:18px}
 }
 
 /* RESPONSIVE */
@@ -578,9 +581,9 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(108,92,231,.3
   #comfortPanel{border-radius:var(--radius);padding:16px}
 }
 @media (orientation: landscape) and (max-height: 520px){
-  #bar{margin:6px;padding:6px 8px}
-  #bar button{padding:7px 10px;font-size:11px}
-  #lobby{margin:4vh auto;padding:20px}
+  html:not(.device-phone) #bar{margin:6px;padding:6px 8px}
+  html:not(.device-phone) #bar button{padding:7px 10px;font-size:11px}
+  html:not(.device-phone) #lobby{margin:4vh auto;padding:20px}
 }
 
 
@@ -625,9 +628,11 @@ html.device-phone #chatForm button{min-width:46px;min-height:46px}
 html.device-phone #emojiPanel{max-height:132px}
 html.device-phone #log>div{line-height:1.45}
 html.device-phone .msg{max-width:88%}
-/* CALL tab: cameras get the whole section, stacked and big */
-html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:column;padding:10px;gap:10px;border-bottom:none}
-html.device-phone body[data-ptab="call"] .camBox{max-height:34dvh;min-height:140px}
+/* CALL tab: cameras keep the SAME 16:9 ratio as tablet/laptop -- width
+   drives height via aspect-ratio, no max-height squeeze. The grid scrolls
+   if the two cams don't fit. */
+html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:column;padding:10px;gap:10px;border-bottom:none;overflow-y:auto;min-height:0}
+html.device-phone body[data-ptab="call"] .camBox{width:100%;aspect-ratio:16/9;max-height:none;min-height:0;flex:0 0 auto}
 html.device-phone #callStatus{padding:6px 10px;font-size:12px}
 /* MORE tab: name/theme card + episodes + bookmarks, roomy */
 html.device-phone #profileCard{display:none}
@@ -638,6 +643,33 @@ html.device-phone #profileCard input,html.device-phone #profileCard button{min-h
 html.device-phone .themeSwitch button{min-width:46px;min-height:42px}
 /* The old chat hide/collapse chevron is redundant under the tab bar */
 html.device-phone #chatToggle,html.device-phone #chatReopen{display:none !important}
+
+/* ---- PHONE · LANDSCAPE: film left, active section right, tab rail edge.
+   (Portrait rules above; this block only reshapes the frame.) */
+@media (orientation: landscape){
+html.device-phone #app{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) auto;grid-template-rows:minmax(0,1fr);gap:8px;padding:6px calc(6px + env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) calc(6px + env(safe-area-inset-left,0px))}
+html.device-phone #stage{grid-column:1;grid-row:1;min-height:0}
+html.device-phone #side{grid-column:2;grid-row:1;min-height:0}
+/* vertical tab rail on the right edge, thumb-reachable */
+html.device-phone #phoneTabs{grid-column:3;grid-row:1;flex-direction:column;width:62px;gap:6px}
+html.device-phone #phoneTabs button{flex:1;min-height:0;border-radius:14px;font-size:10px;padding:4px 2px}
+html.device-phone #phoneTabs .tEmoji{font-size:17px}
+html.device-phone #phoneTabs .badge{top:4px;right:8px}
+/* short screen: slimmer toolbar + chrome so the film gets the height */
+html.device-phone #bar{padding:5px 6px;gap:5px}
+html.device-phone #bar button{min-height:38px;padding:7px 10px;font-size:11.5px}
+html.device-phone #bar input[type="text"]{min-height:38px;min-width:130px}
+html.device-phone #pauseFab{width:46px;height:46px;font-size:19px;right:8px;bottom:8px}
+html.device-phone #log{min-height:80px}
+html.device-phone #chatForm input{min-height:42px}
+html.device-phone #chatForm button{min-width:42px;min-height:42px}
+html.device-phone #emojiPanel{max-height:84px}
+/* Call tab in landscape: side-by-side 16:9, exactly like the laptop panel */
+html.device-phone body[data-ptab="call"] #videoGrid{flex-direction:row;align-items:flex-start}
+html.device-phone body[data-ptab="call"] .camBox{flex:1 1 0;width:auto;aspect-ratio:16/9}
+html.device-phone body[data-ptab="more"] #queue.has{max-height:30dvh}
+html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
+}
 </style>
 </head>
 <body>
