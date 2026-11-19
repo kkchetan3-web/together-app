@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v54 : mic + video URL back on the toolbar; ⋮ keeps the rest -->
+<!-- together-ui v55 : CC on the toolbar · film volume boost beats Android call ducking -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -741,6 +741,8 @@ html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 <button id="mic">🎤 Mic</button>
 <button id="cam">📷 Cam</button>
 <button id="countBtn" title="Start together after a 3-2-1 countdown">⏱ 3‑2‑1</button>
+<button id="ccBtn" title="Subtitles on/off">💬 CC</button>
+<button id="ccSizeBtn" title="Subtitle text size">🔠 Aa</button>
 <button class="react">❤️</button>
 <button class="react">😂</button>
 <button class="react">😮</button>
@@ -755,8 +757,7 @@ html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 <button id="copy">🔗 Invite</button>
 <button id="callSpeakerBtn" title="Call audio: Speaker">🔊 Call</button>
 <button id="audioModeBtn" title="Movie audio mode">🎬 Movie audio</button>
-<button id="ccBtn" title="Subtitles on/off">💬 CC</button>
-<button id="ccSizeBtn" title="Subtitle text size">🔠 Aa</button>
+<button id="boostBtn" title="Boost the film volume while the call is connected">🎚 Film boost</button>
 <button id="comfortBtn" title="Comfort & accessibility">♿ Comfort</button>
 </div>
 </div>
@@ -932,6 +933,8 @@ const el=$('callStatus');if(!el)return;
 const map={new:'Setting up call…',checking:'Connecting call…',connecting:'Connecting call…',connected:'Call connected',completed:'Call connected',disconnected:'Reconnecting call…',failed:'Reconnecting call…',closed:'Call ended'};
 el.textContent=map[state]||('Call: '+state);
 el.className='call-status '+((state==='connected'||state==='completed')?'ok':(state==='failed'||state==='disconnected')?'warn':'');
+const live=(state==='connected'||state==='completed');
+if(live!==callLive){callLive=live;try{applyFilmBoost()}catch(e){}}
 }
 
 const video=$('player');
@@ -1033,7 +1036,21 @@ if(!room)setLobbyStatus('Cannot reach server. Retrying…','error');
 // MODE_NORMAL (the old wrapper forced MODE_IN_COMMUNICATION, which dragged the
 // film onto the earpiece). In a plain browser we fall back to routing the movie
 // element through WebAudio, whose output uses the playback path.
-let movieAudioCtx=null,movieAudioNode=null;
+let movieAudioCtx=null,movieAudioNode=null,movieGainNode=null;
+// Android drops the media volume the moment the WebRTC voice link opens
+// (the OS flips to in-communication mode and ducks music/movie playback).
+// We cannot stop the OS, so we compensate: while the call is CONNECTED the
+// film runs through a WebAudio gain (+ limiter so it will not distort).
+let callLive=false;
+let filmBoost=isAndroid?2:1;
+try{const b=parseFloat(localStorage.getItem('together-film-boost'));if(!isNaN(b)&&b>=1&&b<=3)filmBoost=b}catch(e){}
+function applyFilmBoost(){
+const target=(callLive&&filmBoost>1)?filmBoost:1;
+if(target===1&&!movieAudioCtx)return; // never build the graph for nothing
+const ctx=ensureMovieWebAudio();
+if(!ctx||!movieGainNode)return;
+try{movieGainNode.gain.setTargetAtTime(target,ctx.currentTime,0.1)}catch(e){try{movieGainNode.gain.value=target}catch(_){}}
+}
 function preferMediaSpeaker(){
 try{
 const A=window.AndroidSpeaker;
@@ -1052,6 +1069,7 @@ let mode='\n\nMic capture: '+(movieAudioMode?'unprocessed (movie mode → media 
 try{const t=localStream&&localStream.getAudioTracks()[0];
 if(t&&t.getSettings){const g=t.getSettings();
 mode+='\nEcho cancel: '+g.echoCancellation+' • NS: '+g.noiseSuppression+' • AGC: '+g.autoGainControl;}}catch(e){}
+mode+='\nFilm boost: '+(filmBoost>1?filmBoost+'\u00d7 while call connected':'off')+(callLive?' (call live)':'');
 try{
 const A=window.AndroidSpeaker;
 if(!A||!A.getAudioState)return mode;
@@ -1071,14 +1089,18 @@ if(!AC)return null;
 try{
 movieAudioCtx=new AC();
 movieAudioNode=movieAudioCtx.createMediaElementSource(video);
-movieAudioNode.connect(movieAudioCtx.destination);
+movieGainNode=movieAudioCtx.createGain();
+movieGainNode.gain.value=(callLive&&filmBoost>1)?filmBoost:1;
+const limiter=movieAudioCtx.createDynamicsCompressor();
+limiter.threshold.value=-10;limiter.knee.value=12;limiter.ratio.value=12;limiter.attack.value=0.003;limiter.release.value=0.25;
+movieAudioNode.connect(movieGainNode);movieGainNode.connect(limiter);limiter.connect(movieAudioCtx.destination);
 const wake=()=>{if(movieAudioCtx&&movieAudioCtx.state==='suspended')movieAudioCtx.resume().catch(()=>{})};
 document.addEventListener('pointerdown',wake);
 document.addEventListener('visibilitychange',wake);
 video.addEventListener('play',wake);
 movieAudioCtx.resume().catch(()=>{});
 return movieAudioCtx;
-}catch(e){movieAudioCtx=null;movieAudioNode=null;return null}
+}catch(e){movieAudioCtx=null;movieAudioNode=null;movieGainNode=null;return null}
 }
 function applyCallSpeaker(on){
 callSpeakerOn=on;
@@ -1089,6 +1111,16 @@ if(!native&&on)ensureMovieWebAudio();
 const them=$('them');if(them)them.muted=!on;
 }
 $('callSpeakerBtn').onclick=()=>applyCallSpeaker(!callSpeakerOn);
+const FILM_BOOSTS=[1,1.5,2,3];
+function renderBoost(){const b=$('boostBtn');if(!b)return;b.textContent='🎚 Film boost: '+(filmBoost===1?'off':filmBoost+'×');b.classList.toggle('on',filmBoost>1);}
+if($('boostBtn'))$('boostBtn').onclick=()=>{
+const i=FILM_BOOSTS.indexOf(filmBoost);
+filmBoost=FILM_BOOSTS[(i+1)%FILM_BOOSTS.length];
+try{localStorage.setItem('together-film-boost',String(filmBoost))}catch(e){}
+renderBoost();applyFilmBoost();
+toast(filmBoost>1?('Film volume boost '+filmBoost+'× while the call is connected'):'Film volume boost off','ok');
+};
+renderBoost();
 $('audioModeBtn').onclick=async()=>{
 movieAudioMode=!movieAudioMode;
 try{localStorage.setItem('together-audio-mode',movieAudioMode?'movie':'call')}catch(e){}

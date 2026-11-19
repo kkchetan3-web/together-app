@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.11.1-toolbar-mic-url';
+const VERSION = '2.12.0-film-boost';
 
 const app = express();
 const server = http.createServer(app);
