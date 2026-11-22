@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.14.0-audio-tracks';
+const VERSION = '2.14.1-15gb-uploads';
 
 const app = express();
 const server = http.createServer(app);
@@ -121,7 +121,7 @@ app.get('/ice', (req, res) => {
 });
 
 // Maximum room video upload. Override with MAX_UPLOAD_GB env if ever needed.
-const MAX_UPLOAD_BYTES = Math.max(1, Math.round((Number(process.env.MAX_UPLOAD_GB) || 5) * 1024 ** 3));
+const MAX_UPLOAD_BYTES = Math.max(1, Math.round((Number(process.env.MAX_UPLOAD_GB) || 15) * 1024 ** 3));
 const upload = multer({ dest: uploadsDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
 const chatImgUpload = multer({ dest: uploadsDir, limits: { fileSize: 5 * 1024 ** 2 } });
 const rooms = new Map();

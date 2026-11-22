@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v56 : 🗣 audio language selection for multi-dub movies -->
+<!-- together-ui v57 : upload limit raised to 15 GB -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1786,7 +1786,7 @@ $('fileName').textContent=f.name+' ('+fmtSize(f.size)+')';
 $('upBtn').disabled=false;
 $('upStatus').textContent='Ready to upload';
 };
-const MAX_UPLOAD_GB=5;
+const MAX_UPLOAD_GB=15;
 // Upload in 8 MB slices so each request stays well under the Cloudflare tunnel's
 // ~100 MB body cap AND its ~100 s request window on slow mobile uplinks.
 // Small slices also mean less to re-send after a drop. Works on localhost too.
