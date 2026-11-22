@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.12.0-film-boost';
+const VERSION = '2.13.0-server-hardening';
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +24,24 @@ fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(mediaDir, { recursive: true });
 fs.mkdirSync(chatImgDir, { recursive: true });
 
+// A previous run may have died mid-upload (crash, battery, restart). No
+// upload session survives a restart, so every leftover temp file here is
+// garbage -- and on a phone those multi-GB .part files silently eat the
+// storage until every new upload fails with "disk full".
+try {
+    for (const f of fs.readdirSync(uploadsDir)) fs.rm(path.join(uploadsDir, f), { recursive: true, force: true }, () => {});
+} catch {}
+
+// Free bytes on the volume that holds our uploads/media (statfs is missing
+// on very old Node builds -- then we simply skip the disk guard).
+function freeDiskBytes(dir) {
+    try {
+        if (typeof fs.statfsSync !== 'function') return null;
+        const st = fs.statfsSync(dir);
+        return Number(st.bavail) * Number(st.bsize);
+    } catch { return null; }
+}
+
 app.get('/health', (req, res) => {
     res.json({
         ok: true,
@@ -32,6 +50,7 @@ app.get('/health', (req, res) => {
         rooms: rooms.size,
         uptime: Math.round(process.uptime()),
         turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
+        freeDiskGB: (() => { const b = freeDiskBytes(uploadsDir); return b === null ? 'unknown' : Math.round(b / 1024 ** 3 * 10) / 10; })(),
         maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3),
         subtitles: (() => {
             const w = findWhisper();
@@ -106,6 +125,7 @@ const MAX_UPLOAD_BYTES = Math.max(1, Math.round((Number(process.env.MAX_UPLOAD_G
 const upload = multer({ dest: uploadsDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
 const chatImgUpload = multer({ dest: uploadsDir, limits: { fileSize: 5 * 1024 ** 2 } });
 const rooms = new Map();
+const roomEmptySince = new Map(); // room -> when its last person left
 const roomState = new Map();
 const roomBookmarks = new Map();
 let queue = Promise.resolve();
@@ -316,6 +336,11 @@ app.post('/upload/:room', (req, res, next) => {
         return res.status(403).json({ error: 'Room not found' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file' });
+    const free = freeDiskBytes(uploadsDir);
+    if (free !== null && req.file.size * 1.2 > free) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(507).json({ error: 'Not enough storage on the server phone to convert this video. Free up space and try again.' });
+    }
     res.json({ id: startProcessing(room, req.file.path, req.file.originalname) });
 });
 
@@ -349,13 +374,26 @@ function feedStdin(ff, buf) {
     });
 }
 
+// A live conversion can exit 0 yet produce NOTHING usable (an MP4 whose
+// index/moov sits at the END of the file cannot stream through a pipe:
+// ffmpeg writes a zero-length segment and a zero-duration playlist). Never
+// announce or finalize such output -- validate it first.
+function livePlaylistUsable(outDir) {
+    try {
+        const txt = fs.readFileSync(path.join(outDir, 'index.m3u8'), 'utf8');
+        const dur = txt.split('\n').reduce((t, l) => { const m = l.match(/^#EXTINF:([\d.]+)/); return m ? t + Number(m[1]) : t; }, 0);
+        if (dur <= 0) return false;
+        const seg = (txt.match(/^[^#\s].*\.ts$/m) || [])[0];
+        if (!seg) return false;
+        return fs.statSync(path.join(outDir, seg.trim())).size > 0;
+    } catch { return false; }
+}
+
 function announceLive(s) {
     if (s.cancelled || s.announced || !s.outDir) return;
     const playlist = path.join(s.outDir, 'index.m3u8');
     try {
-        const txt = fs.readFileSync(playlist, 'utf8');
-        const segments = (txt.match(/#EXTINF:/g) || []).length;
-        if (segments < 1) return; // hls.js can start here and keep polling for more
+        if (!livePlaylistUsable(s.outDir)) return; // poller keeps retrying
         s.announced = true;
         if (s.poller) { clearInterval(s.poller); s.poller = null; }
         const url = `/media/${s.mediaId}/index.m3u8`;
@@ -384,7 +422,7 @@ async function tryStartLive(s, endOffset) {
     ff.on('error', () => { s.live = false; s.ff = null; });
     ff.on('close', (code) => {
         s.ffExited = true;
-        if (code === 0 && s.outDir && !s.cancelled) {
+        if (!s.cancelled && s.finalized && s.outDir && livePlaylistUsable(s.outDir) && (code === 0 || s.announced)) {
             // Turn the growing EVENT playlist into a finished VOD.
             const pl = path.join(s.outDir, 'index.m3u8');
             try {
@@ -393,11 +431,23 @@ async function tryStartLive(s, endOffset) {
             } catch {}
             announceLive(s);
             io.to(s.room).emit('player', { type: 'vod', url: `/media/${s.mediaId}/index.m3u8` });
-            if (s.finalized) finishLiveSubtitles(s); // embedded subs or generate
+            finishLiveSubtitles(s); // embedded subs or generate
+        } else if (!s.cancelled && s.finalized && s.tmp) {
+            // Finalized but the live output is empty or broken (e.g. an MP4
+            // whose index sits at the end of the file cannot stream through
+            // a pipe -- ffmpeg even exits 0 with a zero-length segment).
+            // Quietly fall back to a normal full conversion of the kept
+            // source instead of announcing a dead video. This used to strand
+            // the room with an empty playlist and no subtitles.
+            if (s.poller) { clearInterval(s.poller); s.poller = null; }
+            if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
+            if (s.announced) io.to(s.room).emit('chat', { name: 'System', text: `Live playback of "${s.name}" hit a snag — converting it properly now, hang on.` });
+            startProcessing(s.room, s.tmp, s.name); // owns (and removes) the file
+            s.tmp = null;
         } else if (!s.finalized) {
             s.live = false; s.ff = null; // fall back to converting the whole file at the end
         } else if (s.tmp) {
-            fs.unlink(s.tmp, () => {}); // finalized but killed/failed: drop the kept source
+            fs.unlink(s.tmp, () => {}); // cancelled: drop the kept source
         }
     });
     s.poller = setInterval(() => announceLive(s), 700);
@@ -465,6 +515,14 @@ app.post('/upload-chunk/:room', (req, res) => {
         let s = uploadSessions.get(uid);
         if (!s) {
             if (index !== 0) return res.status(409).json({ error: 'Upload must start at chunk 0', next: 0 });
+            // The movie lands on disk twice (temp file + converted HLS copy).
+            // Refuse what cannot fit instead of dying at 90% with a full disk.
+            const free = freeDiskBytes(uploadsDir);
+            if (free !== null && totalSize * 2.2 > free) {
+                return res.status(507).json({ error: 'Not enough storage on the server phone: this video needs about '
+                    + Math.ceil(totalSize * 2.2 / 1024 ** 3) + ' GB free (upload + converted copy) but only '
+                    + Math.round(free / 1024 ** 3 * 10) / 10 + ' GB is available. Delete the current video or free up space.' });
+            }
             const tmp = path.join(uploadsDir, uid + '.part');
             let fd;
             try { fd = fs.openSync(tmp, 'w'); } catch (e) { return res.status(500).json({ error: 'Cannot open temp file: ' + e.message }); }
@@ -670,6 +728,7 @@ io.on('connection', (s) => {
             if (old) { old.leave(room); old.data.room = null; }
         }
         m.set(cid, s.id);
+        roomEmptySince.delete(room);
         s.join(room);
         s.data.room = room;
         s.data.cid = cid;
@@ -752,6 +811,7 @@ io.on('connection', (s) => {
         const m = rooms.get(r);
         if (m.get(s.data.cid) === s.id) {
             m.delete(s.data.cid);
+            if (!m.size) roomEmptySince.set(r, Date.now());
             console.log('[room] leave room=' + r + ' peers=' + m.size);
             s.to(r).emit('peer-left');
         }
@@ -773,6 +833,22 @@ const cleanupTimer = setInterval(() => {
             try { if (Date.now() - fs.statSync(p).mtimeMs > week) fs.rmSync(p, { force: true }); } catch {}
         }
     } catch {}
+    // Rooms nobody has entered for a week: drop their bookkeeping so a
+    // long-running phone server does not grow forever (their media files
+    // age out via the sweep above on the same schedule).
+    for (const [room, m] of rooms) {
+        if (m.size > 0) { roomEmptySince.delete(room); continue; }
+        const since = roomEmptySince.get(room);
+        if (since === undefined) { roomEmptySince.set(room, Date.now()); continue; }
+        if (Date.now() - since < week) continue;
+        for (const job of roomJobs.get(room) || []) { try { job.cancel(); } catch {} }
+        roomJobs.delete(room);
+        roomMedia.delete(room);
+        roomState.delete(room);
+        roomBookmarks.delete(room);
+        roomEmptySince.delete(room);
+        if (room !== 'TOGETHER') rooms.delete(room); // the default room always exists
+    }
 }, 3600 * 1000);
 cleanupTimer.unref();
 
