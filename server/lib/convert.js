@@ -1,5 +1,14 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
+
+// ISO-639 -> display name used for the NAME= attribute of audio renditions.
+const AUDIO_LANG_NAMES = { hin: 'Hindi', eng: 'English', kor: 'Korean', jpn: 'Japanese',
+    tam: 'Tamil', tel: 'Telugu', mal: 'Malayalam', kan: 'Kannada', ben: 'Bengali',
+    mar: 'Marathi', urd: 'Urdu', pan: 'Punjabi', guj: 'Gujarati', spa: 'Spanish',
+    fra: 'French', fre: 'French', deu: 'German', ger: 'German', ita: 'Italian',
+    rus: 'Russian', zho: 'Chinese', chi: 'Chinese', por: 'Portuguese', ara: 'Arabic',
+    tha: 'Thai', vie: 'Vietnamese', ind: 'Indonesian', tur: 'Turkish' };
 
 function probe(file) {
     // Some minimal ffmpeg installs ship without ffprobe; fall back to parsing
@@ -36,23 +45,56 @@ async function convert(inputFile, outDir, onProgress, job) {
     const info = await probe(inputFile);
     if (isCancelled()) throw bail();
     const v = info.streams.find((s) => s.codec_type === 'video');
-    const a = info.streams.find((s) => s.codec_type === 'audio');
+    const auds = info.streams.filter((s) => s.codec_type === 'audio');
+    const a = auds[0];
     if (!v) throw new Error('No video found in this file');
 
     const duration = parseFloat(info.format.duration) || 0;
     const copyV = v.codec_name === 'h264' && v.pix_fmt === 'yuv420p';
     const copyA = a && a.codec_name === 'aac' && a.channels <= 2;
+    const multi = auds.length > 1;
 
-    console.log(`Video: ${copyV ? 'COPY (fast)' : 'RE-ENCODE (slow)'} | Audio: ${copyA ? 'copy' : 'convert'}`);
+    console.log(`Video: ${copyV ? 'COPY (fast)' : 'RE-ENCODE (slow)'} | Audio: ${multi ? auds.length + ' tracks' : (copyA ? 'copy' : 'convert')}`);
 
-    const args = ['-y', '-i', inputFile, '-map', '0:v:0', '-map', '0:a:0?',
-        ...(copyV ? ['-c:v', 'copy']
-            : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']),
-        ...(copyA ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k', '-ac', '2']),
-        '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', path.join(outDir, 'seg_%04d.ts'),
-        '-progress', 'pipe:1', '-nostats',
-        path.join(outDir, 'index.m3u8')];
+    let args;
+    if (!multi) {
+        args = ['-y', '-i', inputFile, '-map', '0:v:0', '-map', '0:a:0?',
+            ...(copyV ? ['-c:v', 'copy']
+                : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']),
+            ...(copyA ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k', '-ac', '2']),
+            '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod',
+            '-hls_segment_filename', path.join(outDir, 'seg_%04d.ts'),
+            '-progress', 'pipe:1', '-nostats',
+            path.join(outDir, 'index.m3u8')];
+    } else {
+        // Movie dubbed in several languages: keep EVERY audio track as an
+        // HLS alternate rendition (one audio group), so each viewer picks
+        // their language in the player -- Hindi for one, English for the
+        // other -- without a re-upload.
+        // Variant 0 = video, variants 1..N = one per audio track. The master
+        // playlist is written by US after ffmpeg finishes: older ffmpeg
+        // builds either reject name:/language:/default: keyvals or write an
+        // empty master, and hand-writing it is deterministic everywhere.
+        const maps = ['-map', '0:v:0'];
+        const codecs = [];
+        const vsm = ['v:0'];
+        auds.forEach((st, i) => {
+            maps.push('-map', '0:a:' + i);
+            const copy = st.codec_name === 'aac' && (st.channels || 2) <= 2;
+            if (copy) codecs.push('-c:a:' + i, 'copy');
+            else codecs.push('-c:a:' + i, 'aac', '-b:a:' + i, '128k', '-ac:a:' + i, '2');
+            vsm.push('a:' + i);
+        });
+        args = ['-y', '-i', inputFile, ...maps,
+            ...(copyV ? ['-c:v', 'copy']
+                : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']),
+            ...codecs,
+            '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod',
+            '-var_stream_map', vsm.join(' '),
+            '-hls_segment_filename', path.join(outDir, 'seg_%v_%05d.ts'),
+            '-progress', 'pipe:1', '-nostats',
+            path.join(outDir, 'index_%v.m3u8')];
+    }
 
     await new Promise((resolve, reject) => {
         const ff = harden(spawn('ffmpeg', args), { onStdout: (d) => {
@@ -74,6 +116,22 @@ async function convert(inputFile, outDir, onProgress, job) {
     });
     if (isCancelled()) throw bail();
 
+    if (multi) {
+        // Hand-written master playlist: audio renditions with readable names
+        // and language tags, video variant bound to the group.
+        const lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+        auds.forEach((st, i) => {
+            const lang = String((st.tags && st.tags.language) || '').toLowerCase().replace(/[^a-z]/g, '');
+            const nm = AUDIO_LANG_NAMES[lang] || ('Audio ' + (i + 1));
+            lines.push('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="' + nm + '"'
+                + (/^[a-z]{2,3}$/.test(lang) ? ',LANGUAGE="' + lang + '"' : '')
+                + ',DEFAULT=' + (i === 0 ? 'YES' : 'NO') + ',AUTOSELECT=YES,URI="index_' + (i + 1) + '.m3u8"');
+        });
+        lines.push('#EXT-X-STREAM-INF:BANDWIDTH=6000000,AUDIO="aud"');
+        lines.push('index_0.m3u8');
+        fs.writeFileSync(path.join(outDir, 'master.m3u8'), lines.join('\n') + '\n');
+    }
+
     const hasSubs = await new Promise((resolve) => {
         const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]));
         if (job) job.kill = () => { try { s.kill('SIGKILL'); } catch {} };
@@ -82,7 +140,7 @@ async function convert(inputFile, outDir, onProgress, job) {
     });
     if (isCancelled()) throw bail();
 
-    return { duration, hasSubs };
+    return { duration, hasSubs, playlist: multi ? 'master.m3u8' : 'index.m3u8', audioTracks: auds.length };
 }
 
 // Probe a file that is still being written (progressive upload). Bounded so a
@@ -103,14 +161,16 @@ function probeWithFfmpeg(file, timeoutMs = 12000) {
             if (settled) return;
             const streams = [];
             const v = err.match(/Stream #\d+:\d+[^\n]*: Video: ([a-zA-Z0-9_]+)([^\n]*)/);
-            const a = err.match(/Stream #\d+:\d+[^\n]*: Audio: ([a-zA-Z0-9_]+)/);
             if (v) {
                 const pix = (v[2] || '').match(/\b(yuv[a-z0-9]+|nv\d+|rgb[a-z0-9]*|bgr[a-z0-9]*)\b/);
                 streams.push({ codec_type: 'video', codec_name: v[1], pix_fmt: pix ? pix[1] : undefined });
             }
-            if (a) {
-                const ch = err.match(/Audio:[^\n]*?(\d+) channels/);
-                streams.push({ codec_type: 'audio', codec_name: a[1], channels: ch ? Number(ch[1]) : 2 });
+            for (const m of err.matchAll(/Stream #\d+:\d+(?:\((\w+)\))?[^\n]*?: Audio: ([a-zA-Z0-9_]+)([^\n]*)/g)) {
+                const line = m[3] || '';
+                const chm = line.match(/(\d+)\s*channels/);
+                const channels = chm ? Number(chm[1]) : (/mono/.test(line) ? 1 : /stereo/.test(line) ? 2 : 6);
+                streams.push({ codec_type: 'audio', codec_name: m[2], channels,
+                    tags: m[1] ? { language: m[1] } : undefined });
             }
             if (!streams.length) return done(reject, new Error('probe failed'));
             const d = err.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);

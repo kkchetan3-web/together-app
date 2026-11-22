@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v55 : CC on the toolbar · film volume boost beats Android call ducking -->
+<!-- together-ui v56 : 🗣 audio language selection for multi-dub movies -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -751,6 +751,7 @@ html.device-phone body[data-ptab="more"] #bookmarks.has{max-height:24dvh}
 <div id="progWrap"><div id="progBar"></div></div>
 </div>
 <div id="moreMenu" hidden>
+<button id="audioTrackBtn" hidden title="Audio language">🗣 Audio</button>
 <button id="share">🖥 Share</button>
 <button id="syncBtn">⟲ Sync</button>
 <button id="markBtn" title="Bookmark this moment for both of you">🔖 Mark</button>
@@ -1519,6 +1520,43 @@ sys('Invite link: '+link);
 prompt('Copied! Send this link to your partner:',link);
 };
 
+// ---- Audio language selection (movies with several dubs) -----------------
+// The server publishes every audio track of the movie as an HLS rendition;
+// hls.js exposes them as audioTracks. The 🗣 button appears only when there
+// are 2+ and cycles through them. Each viewer picks independently.
+const AUDIO_LANGS={hin:'Hindi',hi:'Hindi',eng:'English',en:'English',kor:'Korean',ko:'Korean',jpn:'Japanese',ja:'Japanese',tam:'Tamil',ta:'Tamil',tel:'Telugu',te:'Telugu',mal:'Malayalam',ml:'Malayalam',kan:'Kannada',kn:'Kannada',ben:'Bengali',bn:'Bengali',mar:'Marathi',mr:'Marathi',urd:'Urdu',ur:'Urdu',pan:'Punjabi',pa:'Punjabi',guj:'Gujarati',gu:'Gujarati',spa:'Spanish',es:'Spanish',fra:'French',fre:'French',fr:'French',deu:'German',ger:'German',de:'German',ita:'Italian',it:'Italian',rus:'Russian',ru:'Russian',zho:'Chinese',chi:'Chinese',zh:'Chinese',por:'Portuguese',pt:'Portuguese',ara:'Arabic',ar:'Arabic',tha:'Thai',th:'Thai',vie:'Vietnamese',vi:'Vietnamese',ind:'Indonesian',tur:'Turkish',tr:'Turkish'};
+function audioTrackLabel(t,i){
+if(!t)return 'Audio '+((i|0)+1);
+const lang=String(t.lang||'').toLowerCase().split('-')[0];
+return AUDIO_LANGS[lang]||t.name||('Audio '+((i|0)+1));
+}
+function refreshAudioBtn(){
+const b=$('audioTrackBtn');if(!b)return;
+const ts=(hls&&hls.audioTracks)||[];
+if(ts.length<2){b.hidden=true;return;}
+b.hidden=false;
+const i=Math.max(0,hls.audioTrack|0);
+b.textContent='🗣 '+audioTrackLabel(ts[i],i);
+}
+function applyPreferredAudio(){
+try{
+const want=String(localStorage.getItem('together-audio-lang')||'').toLowerCase();
+if(!want||!hls||!hls.audioTracks||hls.audioTracks.length<2)return;
+const i=hls.audioTracks.findIndex((t)=>String(t.lang||'').toLowerCase().split('-')[0]===want);
+if(i>=0&&i!==hls.audioTrack)hls.audioTrack=i;
+}catch(e){}
+}
+if($('audioTrackBtn'))$('audioTrackBtn').onclick=()=>{
+if(!hls||!hls.audioTracks||hls.audioTracks.length<2)return;
+const n=hls.audioTracks.length;
+const i=((hls.audioTrack|0)+1)%n;
+hls.audioTrack=i;
+const t=hls.audioTracks[i];
+try{localStorage.setItem('together-audio-lang',String((t&&t.lang)||'').toLowerCase().split('-')[0])}catch(e){}
+refreshAudioBtn();
+toast('Audio: '+audioTrackLabel(t,i),'ok');
+};
+
 function loadSource(url,opts){
 opts=opts||{};
 beginLoad();
@@ -1531,6 +1569,9 @@ if(url.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
 // we can start at 0 (not the live edge) and stay in sync with the partner.
 hls=opts.live?new Hls({liveSyncDurationCount:3,maxBufferLength:30}):new Hls();
 hls.loadSource(url);hls.attachMedia(video);
+hls.on(Hls.Events.AUDIO_TRACKS_UPDATED,()=>{applyPreferredAudio();refreshAudioBtn();});
+hls.on(Hls.Events.AUDIO_TRACK_SWITCHED,refreshAudioBtn);
+refreshAudioBtn();
 if(opts.live){hls.once(Hls.Events.MANIFEST_LOADED,()=>{try{hls.startLoad(0)}catch(_){}});}
 }else video.src=url;
 if(opts.startAt){
@@ -1691,7 +1732,7 @@ if(!target||!cur||cur.url===target)addSubs(url);
 const it=playlist.find(p=>p.url===target);if(it)it.subs=url;
 return;
 }
-if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();uploadInProgress=false;resetUploadUI();sys('The video was deleted.');return}
+if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}refreshAudioBtn();video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();uploadInProgress=false;resetUploadUI();sys('The video was deleted.');return}
 remote=true;
 if(ytMode&&yt){
 if(type==='buffering'){resumeAfter=!ytPaused();yt.pauseVideo()}

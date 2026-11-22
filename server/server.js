@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.13.0-server-hardening';
+const VERSION = '2.14.0-audio-tracks';
 
 const app = express();
 const server = http.createServer(app);
@@ -193,10 +193,14 @@ function hlsDuration(playlistFile) {
             .reduce((t, l) => { const m = l.match(/^#EXTINF:([\d.]+)/); return m ? t + Number(m[1]) : t; }, 0);
     } catch { return 0; }
 }
-function startSubtitleJob(room, id, name) {
+function startSubtitleJob(room, id, name, playlistName) {
     const outDir = path.join(mediaDir, id);
     const outVtt = path.join(outDir, 'subs.vtt');
-    const playlistFile = path.join(outDir, 'index.m3u8');
+    const pl = playlistName || 'index.m3u8';
+    const playlistFile = path.join(outDir, pl);
+    // Duration lives in a MEDIA playlist; with audio renditions the main
+    // playlist is a master without #EXTINF -- read the video variant instead.
+    const durFile = pl === 'master.m3u8' ? path.join(outDir, 'index_0.m3u8') : playlistFile;
     const job = { cancelled: false, kill: null };
     job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
     trackJob(room, job);
@@ -212,7 +216,7 @@ function startSubtitleJob(room, id, name) {
         // We grow subs.vtt on disk and re-announce it every few seconds (with
         // a cache-busting ?r=) so both phones pick up the new lines while the
         // movie is playing -- no waiting for the whole transcription.
-        const url = `/media/${id}/index.m3u8`;
+        const url = `/media/${id}/${pl}`;
         const subs = `/media/${id}/subs.vtt`;
         const cues = [];
         let announcedPartial = false, lastPush = 0, rev = 0;
@@ -233,7 +237,7 @@ function startSubtitleJob(room, id, name) {
         };
         try {
             await generateSubs(playlistFile, outVtt, {
-                duration: hlsDuration(playlistFile),
+                duration: hlsDuration(durFile),
                 onProgress: (p) => io.to(room).emit('subs', { state: 'progress', percent: p, name }),
                 onSegment: (cue) => { cues.push(cue); pushPartial(false); },
                 job,
@@ -293,14 +297,16 @@ function startProcessing(room, tmp, name) {
             if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
             return convert(tmp, outDir, (percent) => { if (!job.cancelled) io.to(room).emit('processing', { name, percent }); }, job);
         })
-        .then(({ hasSubs }) => {
+        .then(({ hasSubs, playlist, audioTracks }) => {
             if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
-            const url = `/media/${id}/index.m3u8`;
+            const pl = playlist || 'index.m3u8';
+            const url = `/media/${id}/${pl}`;
             const subs = hasSubs ? `/media/${id}/subs.vtt` : null;
             roomState.set(room, { url, subs });
             io.to(room).emit('player', { type: 'load', url, subs });
-            io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!` });
-            if (!hasSubs) startSubtitleJob(room, id, name); // movie came without subtitles -> make them
+            io.to(room).emit('chat', { name: 'System', text: `"${name}" is ready. Enjoy!`
+                + (audioTracks > 1 ? ` This movie has ${audioTracks} audio languages — each of you can pick your own under ⋮ → 🗣 Audio.` : '') });
+            if (!hasSubs) startSubtitleJob(room, id, name, pl); // movie came without subtitles -> make them
         })
         .catch((err) => {
             if (job.cancelled || err.cancelled) {
@@ -409,8 +415,10 @@ async function tryStartLive(s, endOffset) {
     let info;
     try { info = await probePartial(s.tmp); } catch { return; } // not enough data yet; retry on a later slice
     const v = (info.streams || []).find((x) => x.codec_type === 'video');
-    const a = (info.streams || []).find((x) => x.codec_type === 'audio');
+    const auds = (info.streams || []).filter((x) => x.codec_type === 'audio');
+    const a = auds[0];
     if (!v) { s.live = false; return; }
+    if (auds.length > 1) { s.live = false; return; } // keep ALL languages: full convert with audio renditions
     const copyV = v.codec_name === 'h264';
     const copyA = !!a && a.codec_name === 'aac' && a.channels <= 2;
     s.mediaId = crypto.randomBytes(12).toString('hex');
