@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v60 : player black box — every fatal playback error is reported in chat with a likely cause -->
+<!-- together-ui v61 : multi-audio movies play instantly while uploading; all-languages version swaps in seamlessly -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1729,7 +1729,7 @@ video.addEventListener('waiting',()=>{if(!remote&&!loadingMedia)socket.emit('pla
 video.addEventListener('playing',()=>{if(!remote&&!loadingMedia)socket.emit('player',{type:'ready'})});
 $('syncBtn').onclick=()=>{socket.emit('player',{type:'seek',time:mediaTime()});sys('Synced partner to your position')};
 
-socket.on('player',({type,time,url,subs,kind,videoId,live,startAt,target})=>{
+socket.on('player',({type,time,url,subs,kind,videoId,live,startAt,target,resume,replace})=>{
 if(type==='vod'){sys('Upload finished — the full video is now available.');return}
 if(type==='load'){
 if(kind==='youtube'&&videoId){
@@ -1740,6 +1740,20 @@ return;
 }
 const wasUpload=uploadInProgress;
 const capturedName=($('fileName')&&$('fileName').textContent)||'';
+if(resume){
+// Seamless upgrade: the all-languages version replaces the one playing.
+// Keep position, play state and subtitles — no visible interruption.
+const pos=mediaTime()||0;const wasPlaying=!video.paused&&!video.ended;
+loadSource(url,{});addSubs(subs);
+if(pos>0.5)pendingSeek=pos;
+if(wasPlaying)video.addEventListener('canplay',()=>safePlay(video),{once:true});
+const idx=playlist.findIndex(p=>p.url===replace);
+if(idx>=0){playlist[idx].url=url;playlist[idx].subs=subs;currentIdx=idx}
+else if(!playlist.some(p=>p.url===url)){playlist.push({url,subs,name:capturedName.replace(/\s*\(.*\)$/,'').trim()||('Episode '+(playlist.length+1))});currentIdx=playlist.length-1}
+uploadInProgress=false;resetUploadUI();renderQueue();
+sys('Switched to the full version — pick your audio language under ⋮ → 🗣 Audio.');
+return;
+}
 loadSource(url,{live,startAt});addSubs(subs);
 if(time!=null&&!live)pendingSeek=time; // episode switches carry an explicit start
 sys(live?'Playing while it uploads — you both start together':'A video was loaded');

@@ -12,7 +12,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.15.2-player-blackbox';
+const VERSION = '2.16.0-instant-multiaudio';
 
 const app = express();
 const server = http.createServer(app);
@@ -368,7 +368,80 @@ function startLiveSubtitleChunks(s) {
             io.to(room).emit('subs', { state: 'ready', name });
             io.to(room).emit('chat', { name: 'System', text: `English subtitles for "${name}" are complete ✅` });
         }
-    })().catch(() => {}).finally(() => untrackJob(room, job));
+    })().catch(() => {}).finally(() => {
+        untrackJob(room, job);
+        job.done = true;
+        if (job.onDone) { try { job.onDone(); } catch {} }
+    });
+}
+
+// A multi-dub movie starts playing immediately with its default audio track
+// (plain live pipe). Once the upload lands, convert the full multi-language
+// version in the background and swap it in seamlessly — playback position,
+// play state and subtitles all carry across.
+function upgradeToMultiAudio(s) {
+    const room = s.room, name = s.name, tmp = s.tmp, oldDir = s.outDir, oldId = s.mediaId;
+    if (!tmp) return;
+    const id = crypto.randomBytes(12).toString('hex');
+    const outDir = path.join(mediaDir, id);
+    try { fs.mkdirSync(outDir, { recursive: true }); } catch { return; }
+    trackMedia(room, id);
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
+    io.to(room).emit('chat', { name: 'System', text: `"${name}" has several audio languages — preparing all of them in the background. Keep watching; it switches over by itself.` });
+    queue = queue
+        .then(() => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+            return convert(tmp, outDir, (percent) => { if (!job.cancelled) io.to(room).emit('processing', { name: `${name} — all languages`, percent }); }, job);
+        })
+        .then(({ hasSubs, playlist, audioTracks }) => {
+            if (job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+            const pl = playlist || 'index.m3u8';
+            const url = `/media/${id}/${pl}`;
+            const oldUrl = `/media/${oldId}/index.m3u8`;
+            const dstVtt = path.join(outDir, 'subs.vtt');
+            let subs = hasSubs ? `/media/${id}/subs.vtt` : null;
+            if (!subs) {
+                // Carry whatever the live transcription produced so far.
+                try { if (fs.existsSync(path.join(oldDir, 'subs.vtt'))) { fs.copyFileSync(path.join(oldDir, 'subs.vtt'), dstVtt); subs = `/media/${id}/subs.vtt`; } } catch {}
+            }
+            roomState.set(room, { url, subs });
+            io.to(room).emit('player', { type: 'load', url, subs, resume: true, replace: oldUrl });
+            io.to(room).emit('chat', { name: 'System', text: `All ${audioTracks} audio languages of "${name}" are ready 🗣 — each of you can pick your own under ⋮ → 🗣 Audio.` });
+            const chunkJob = s.subChunks;
+            const finishUp = () => {
+                // Live transcription (writing into the old folder) is finished:
+                // bring the final subtitles across, then drop the old copy to
+                // free the phone's disk.
+                try {
+                    const src = path.join(oldDir, 'subs.vtt');
+                    if (!hasSubs && fs.existsSync(src)) {
+                        fs.copyFileSync(src, dstVtt);
+                        const st = roomState.get(room);
+                        if (st && st.url === url) st.subs = `/media/${id}/subs.vtt`;
+                        io.to(room).emit('player', { type: 'subs', url: `/media/${id}/subs.vtt?r=u${Date.now() % 1e6}`, target: url });
+                    }
+                } catch {}
+                const set = roomMedia.get(room);
+                if (set) set.delete(oldId);
+                fs.rm(oldDir, { recursive: true, force: true }, () => {});
+            };
+            if (chunkJob && !chunkJob.done) chunkJob.onDone = finishUp;
+            else finishUp();
+            if (!hasSubs && !chunkJob) startSubtitleJob(room, id, name, pl);
+        })
+        .catch((err) => {
+            if (job.cancelled || err.cancelled) {
+                fs.rm(outDir, { recursive: true, force: true }, () => {});
+                io.to(room).emit('processing', { name: `${name} — all languages`, percent: -1 });
+                return;
+            }
+            io.to(room).emit('chat', { name: 'System', text: `Could not prepare the other audio languages (${err.message}). The default language keeps playing.` });
+            io.to(room).emit('processing', { name: `${name} — all languages`, percent: -1 });
+            fs.rm(outDir, { recursive: true, force: true }, () => {});
+        })
+        .finally(() => { untrackJob(room, job); fs.unlink(tmp, () => {}); });
 }
 
 // After a live (watch-while-uploading) movie finishes: if the source has an
@@ -393,7 +466,7 @@ async function finishLiveSubtitles(s) {
             if (!s.cancelled && !s.subChunks) startSubtitleJob(s.room, s.mediaId, s.name);
         }
     } catch {}
-    if (s.tmp) fs.unlink(s.tmp, () => {});
+    if (s.tmp && !s.keepTmp) fs.unlink(s.tmp, () => {});
 }
 function trackMedia(room, id) {
     if (!roomMedia.has(room)) roomMedia.set(room, new Set());
@@ -537,7 +610,10 @@ async function tryStartLive(s, endOffset) {
     const auds = (info.streams || []).filter((x) => x.codec_type === 'audio');
     const a = auds[0];
     if (!v) { s.live = false; return; }
-    if (auds.length > 1) { s.live = false; return; } // keep ALL languages: full convert with audio renditions
+    // Multi-dub movie: play NOW with the default audio track (what yesterday's
+    // single-audio movies did), and build the full all-languages version in the
+    // background after the upload — it swaps in seamlessly when ready.
+    if (auds.length > 1) { s.multiAudio = true; s.keepTmp = true; }
     // Copy only 8-bit h264 — 10-bit/4:2:2 h264 copies fine but Android MSE
     // cannot decode it (broken-video icon). Anything else gets re-encoded.
     const copyV = v.codec_name === 'h264' && v.pix_fmt === 'yuv420p';
@@ -561,6 +637,7 @@ async function tryStartLive(s, endOffset) {
             announceLive(s);
             io.to(s.room).emit('player', { type: 'vod', url: `/media/${s.mediaId}/index.m3u8` });
             finishLiveSubtitles(s); // embedded subs or generate
+            if (s.multiAudio && s.tmp) upgradeToMultiAudio(s); // swap in all languages when ready
         } else if (!s.cancelled && s.finalized && s.tmp) {
             // Finalized but the live output is empty or broken (e.g. an MP4
             // whose index sits at the end of the file cannot stream through
