@@ -11,7 +11,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.14.1-15gb-uploads';
+const VERSION = '2.15.0-live-english-subs';
 
 const app = express();
 const server = http.createServer(app);
@@ -198,9 +198,10 @@ function startSubtitleJob(room, id, name, playlistName) {
     const outVtt = path.join(outDir, 'subs.vtt');
     const pl = playlistName || 'index.m3u8';
     const playlistFile = path.join(outDir, pl);
-    // Duration lives in a MEDIA playlist; with audio renditions the main
-    // playlist is a master without #EXTINF -- read the video variant instead.
-    const durFile = pl === 'master.m3u8' ? path.join(outDir, 'index_0.m3u8') : playlistFile;
+    // whisper must read a MEDIA playlist, never the master: for multi-audio
+    // movies feed the first audio rendition directly (deterministic on every
+    // ffmpeg build, and it also carries the #EXTINF durations).
+    const genFile = pl === 'master.m3u8' ? path.join(outDir, 'index_1.m3u8') : playlistFile;
     const job = { cancelled: false, kill: null };
     job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
     trackJob(room, job);
@@ -236,8 +237,8 @@ function startSubtitleJob(room, id, name, playlistName) {
             io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
         };
         try {
-            await generateSubs(playlistFile, outVtt, {
-                duration: hlsDuration(durFile),
+            await generateSubs(genFile, outVtt, {
+                duration: hlsDuration(genFile),
                 onProgress: (p) => io.to(room).emit('subs', { state: 'progress', percent: p, name }),
                 onSegment: (cue) => { cues.push(cue); pushPartial(false); },
                 job,
@@ -257,22 +258,103 @@ function startSubtitleJob(room, id, name, playlistName) {
     }).catch(() => {}).finally(() => untrackJob(room, job));
 }
 
-// After a live (watch-while-uploading) movie finishes: the original file was
-// kept for this moment -- pull its embedded subtitle track if it has one,
-// otherwise queue generation. Either way the source file is removed after.
+// Chunk-by-chunk subtitles for watch-while-uploading movies: as soon as the
+// live playlist is announced, transcribe it in windows — the first English
+// lines appear a couple of minutes into the upload instead of hours after
+// it. Windows are serialized on the whisper queue; timestamps are shifted
+// by each window's start so the cues line up with the movie.
+const SUB_WINDOW_SEC = 120;
+function startLiveSubtitleChunks(s) {
+    if (s.subChunks || s.cancelled || !s.outDir || !subtitlesAvailable()) return;
+    const room = s.room, id = s.mediaId, name = s.name, outDir = s.outDir;
+    const playlistFile = path.join(outDir, 'index.m3u8');
+    const outVtt = path.join(outDir, 'subs.vtt');
+    const winVtt = path.join(outDir, '.subwin.vtt');
+    const url = `/media/${id}/index.m3u8`;
+    const subs = `/media/${id}/subs.vtt`;
+    const job = { cancelled: false, kill: null };
+    job.cancel = () => { job.cancelled = true; try { if (job.kill) job.kill(); } catch {} };
+    trackJob(room, job);
+    s.subChunks = job;
+    const cues = [];
+    let rev = 0, announced = false;
+    const push = () => {
+        if (job.cancelled || !cues.length) return;
+        const vtt = 'WEBVTT\n\n' + cues.map((c) => `${c.start} --> ${c.end}\n${c.text}`).join('\n\n') + '\n';
+        try { fs.writeFileSync(outVtt, vtt); } catch { return; }
+        const st = roomState.get(room);
+        if (st && st.url === url) st.subs = subs;
+        if (!announced) {
+            announced = true;
+            io.to(room).emit('chat', { name: 'System', text: `Live English subtitles for "${name}" are on ✅ — transcribing while it uploads.` });
+        }
+        io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
+    };
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let processed = 0;
+    (async () => {
+        io.to(room).emit('subs', { state: 'start', name });
+        io.to(room).emit('chat', { name: 'System', text: `Generating English subtitles for "${name}" chunk-by-chunk while it uploads…` });
+        while (!job.cancelled) {
+            let txt = '';
+            try { txt = fs.readFileSync(playlistFile, 'utf8'); } catch { break; } // deleted / replaced
+            const done = txt.includes('#EXT-X-ENDLIST');
+            const dur = hlsDuration(playlistFile);
+            const remain = dur - processed;
+            // Mid-upload: keep a 5 s safety margin so ffmpeg never reads past
+            // the last finished segment. At the end: drain the tail.
+            if ((!done && remain >= SUB_WINDOW_SEC + 5) || (done && remain > 1)) {
+                const len = done ? remain : Math.min(remain - 5, 300);
+                const start = processed;
+                await new Promise((res) => {
+                    subsQueue = subsQueue.then(async () => {
+                        if (job.cancelled) return;
+                        await generateSubs(playlistFile, winVtt, {
+                            window: { start, length: len },
+                            onSegment: (cue) => cues.push(cue),
+                            job,
+                        }).catch(() => {});
+                    }).catch(() => {}).finally(res);
+                });
+                processed = start + len;
+                push();
+                if (dur > 0) io.to(room).emit('subs', { state: 'progress', percent: Math.min(99, Math.round((processed / Math.max(dur, 1)) * 100)), name });
+            } else if (done) {
+                break;
+            } else {
+                await sleep(4000);
+            }
+        }
+        fs.unlink(winVtt, () => {});
+        fs.unlink(winVtt + '.audio.wav', () => {});
+        if (!job.cancelled && cues.length) {
+            push();
+            io.to(room).emit('subs', { state: 'ready', name });
+            io.to(room).emit('chat', { name: 'System', text: `English subtitles for "${name}" are complete ✅` });
+        }
+    })().catch(() => {}).finally(() => untrackJob(room, job));
+}
+
+// After a live (watch-while-uploading) movie finishes: if the source has an
+// ENGLISH subtitle track, prefer it (and stop the chunked transcription);
+// otherwise the chunked job keeps going / a full generation is queued.
 async function finishLiveSubtitles(s) {
     const outVtt = path.join(s.outDir, 'subs.vtt');
     const url = `/media/${s.mediaId}/index.m3u8`;
     try {
-        const found = s.tmp && fs.existsSync(s.tmp) && await extractEmbedded(s.tmp, outVtt);
+        const tmpVtt = outVtt + '.emb';
+        const found = s.tmp && fs.existsSync(s.tmp) && await extractEmbedded(s.tmp, tmpVtt);
         if (found && !s.cancelled) {
+            if (s.subChunks) { try { s.subChunks.cancel(); } catch {} }
+            try { fs.renameSync(tmpVtt, outVtt); } catch {}
             const subs = `/media/${s.mediaId}/subs.vtt`;
             const st = roomState.get(s.room);
             if (st && st.url === url) st.subs = subs;
-            io.to(s.room).emit('player', { type: 'subs', url: subs, target: url });
-            io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" came with subtitles — switched on ✅` });
-        } else if (!s.cancelled) {
-            startSubtitleJob(s.room, s.mediaId, s.name);
+            io.to(s.room).emit('player', { type: 'subs', url: subs + '?e=1', target: url });
+            io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" came with English subtitles — switched on ✅` });
+        } else {
+            fs.unlink(tmpVtt, () => {});
+            if (!s.cancelled && !s.subChunks) startSubtitleJob(s.room, s.mediaId, s.name);
         }
     } catch {}
     if (s.tmp) fs.unlink(s.tmp, () => {});
@@ -408,6 +490,7 @@ function announceLive(s) {
         // Same start instant for both peers -> simultaneous start.
         io.to(s.room).emit('player', { type: 'load', url, subs: null, live: true, startAt: Date.now() + 3000 });
         io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" is playing while it uploads. Both of you start together.` });
+        startLiveSubtitleChunks(s); // English subtitles begin DURING the upload
     } catch {}
 }
 
@@ -448,6 +531,7 @@ async function tryStartLive(s, endOffset) {
             // source instead of announcing a dead video. This used to strand
             // the room with an empty playlist and no subtitles.
             if (s.poller) { clearInterval(s.poller); s.poller = null; }
+            if (s.subChunks) { try { s.subChunks.cancel(); } catch {} }
             if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
             if (s.announced) io.to(s.room).emit('chat', { name: 'System', text: `Live playback of "${s.name}" hit a snag — converting it properly now, hang on.` });
             startProcessing(s.room, s.tmp, s.name); // owns (and removes) the file

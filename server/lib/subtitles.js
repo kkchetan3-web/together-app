@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { probePartial, TEXT_SUB_CODECS } = require('./convert');
 
 function firstExisting(cands) {
     for (const c of cands) {
@@ -76,11 +77,24 @@ function runChild(cmd, args, { job, onLine } = {}) {
     });
 }
 
-// Fast check: does the file carry its own subtitle track? Extracting is a
-// cheap remux, so always try this before spending hours on generation.
-function extractEmbedded(input, outVtt) {
+// Fast check: does the file carry an ENGLISH text subtitle track? Only that
+// is worth reusing -- the user wants English subtitles for every language,
+// and the first track of a multi-language movie is usually not English.
+// No English track (or no subtitles at all) -> return false and let whisper
+// translate the audio to English instead.
+async function extractEmbedded(input, outVtt) {
+    let eng = -1;
+    try {
+        const info = await probePartial(input);
+        const subs = (info.streams || []).filter((st) => st.codec_type === 'subtitle');
+        subs.forEach((st, i) => {
+            const lang = String((st.tags && st.tags.language) || '').toLowerCase();
+            if (eng < 0 && TEXT_SUB_CODECS.has(st.codec_name) && (lang === 'eng' || lang === 'en')) eng = i;
+        });
+    } catch { return false; }
+    if (eng < 0) return false;
     return runChild('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y',
-        '-i', input, '-map', '0:s:0', outVtt])
+        '-i', input, '-map', '0:s:' + eng, outVtt])
         .then(() => {
             try { return fs.statSync(outVtt).size > 10; } catch { return false; }
         })
@@ -112,6 +126,20 @@ function stripJunkCues(vtt) {
 
 const TS = /\[(\d+):(\d{2}):(\d{2})[.,]\d{3}\s+-->/;
 const SEG = /\[(\d+:\d{2}:\d{2}[.,]\d{3})\s+-->\s+(\d+:\d{2}:\d{2}[.,]\d{3})\]\s?(.*)/;
+// Shift a WebVTT timestamp by `off` seconds (used when transcribing a
+// window of a longer movie: whisper's clock starts at 0 for each window).
+function shiftTs(ts, off) {
+    if (!off) return ts;
+    const m = ts.match(/(\d+):(\d{2}):(\d{2})\.(\d{3})/);
+    if (!m) return ts;
+    let t = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000 + off;
+    const h = Math.floor(t / 3600); t -= h * 3600;
+    const mm = Math.floor(t / 60); t -= mm * 60;
+    const sec = Math.floor(t);
+    const ms = Math.round((t - sec) * 1000);
+    return String(h).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+}
+
 // whisper prints h:mm:ss,mmm or hh:mm:ss.mmm depending on build -> WebVTT form
 function normTs(t) {
     const m = t.match(/(\d+):(\d{2}):(\d{2})[.,](\d{3})/);
@@ -120,15 +148,19 @@ function normTs(t) {
 
 // Generate subtitles for `input` (any video ffmpeg can read, including an HLS
 // playlist) into `outVtt`. Long-running and fully cancellable via `job`.
-async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment, job } = {}) {
+async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment, job, window: win } = {}) {
     const w = findWhisper();
     if (!w) { const e = new Error('whisper.cpp is not installed'); e.notInstalled = true; throw e; }
     const wav = outVtt + '.audio.wav';
     const ofBase = outVtt.replace(/\.vtt$/, '');
+    const off = win ? Number(win.start) || 0 : 0;
     try {
         // 1) movie -> mono 16 kHz wav (what whisper expects). ~110 MB per hour.
+        //    In window mode only [start, start+length) is extracted, which is
+        //    what lets subtitles run chunk-by-chunk WHILE a movie uploads.
         await runChild('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y',
-            '-i', input, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], { job });
+            ...(win ? ['-ss', String(off)] : []), '-i', input, ...(win ? ['-t', String(win.length)] : []),
+            '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], { job });
         if (job && job.cancelled) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
         // 2) speech -> ENGLISH text. -tr is whisper's translate task: Japanese,
         //    Hindi, anything -> English; English stays English. Disable only
@@ -153,7 +185,7 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
                 const seg = line.match(SEG);
                 if (seg && onSegment) {
                     const text = seg[3].trim();
-                    if (text && !isJunkCue(text)) onSegment({ start: normTs(seg[1]), end: normTs(seg[2]), text });
+                    if (text && !isJunkCue(text)) onSegment({ start: shiftTs(normTs(seg[1]), off), end: shiftTs(normTs(seg[2]), off), text });
                 }
                 if (!onProgress) return;
                 const pm = line.match(/progress\s*=\s*(\d+)%/);

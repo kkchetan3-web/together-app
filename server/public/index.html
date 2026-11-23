@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v57 : upload limit raised to 15 GB -->
+<!-- together-ui v58 : CC survives audio switching · English-only subtitle policy · live chunked transcription -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1569,8 +1569,10 @@ if(url.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
 // we can start at 0 (not the live edge) and stay in sync with the partner.
 hls=opts.live?new Hls({liveSyncDurationCount:3,maxBufferLength:30}):new Hls();
 hls.loadSource(url);hls.attachMedia(video);
-hls.on(Hls.Events.AUDIO_TRACKS_UPDATED,()=>{applyPreferredAudio();refreshAudioBtn();});
-hls.on(Hls.Events.AUDIO_TRACK_SWITCHED,refreshAudioBtn);
+hls.on(Hls.Events.AUDIO_TRACKS_UPDATED,()=>{applyPreferredAudio();refreshAudioBtn();applyCc();});
+// Switching the audio language flushes buffers; re-assert the subtitle
+// track afterwards so CC never silently turns off.
+hls.on(Hls.Events.AUDIO_TRACK_SWITCHED,()=>{refreshAudioBtn();applyCc();});
 refreshAudioBtn();
 if(opts.live){hls.once(Hls.Events.MANIFEST_LOADED,()=>{try{hls.startLoad(0)}catch(_){}});}
 }else video.src=url;

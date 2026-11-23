@@ -10,6 +10,9 @@ const AUDIO_LANG_NAMES = { hin: 'Hindi', eng: 'English', kor: 'Korean', jpn: 'Ja
     rus: 'Russian', zho: 'Chinese', chi: 'Chinese', por: 'Portuguese', ara: 'Arabic',
     tha: 'Thai', vie: 'Vietnamese', ind: 'Indonesian', tur: 'Turkish' };
 
+// Subtitle codecs that are TEXT and can be converted to WebVTT.
+const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text']);
+
 function probe(file) {
     // Some minimal ffmpeg installs ship without ffprobe; fall back to parsing
     // `ffmpeg -i` (same trick probePartial already uses for live playback).
@@ -132,8 +135,20 @@ async function convert(inputFile, outDir, onProgress, job) {
         fs.writeFileSync(path.join(outDir, 'master.m3u8'), lines.join('\n') + '\n');
     }
 
-    const hasSubs = await new Promise((resolve) => {
-        const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:0', path.join(outDir, 'subs.vtt')]));
+    // Reuse embedded subtitles ONLY when the movie carries an ENGLISH text
+    // track. The first subtitle track of a multi-language movie is usually
+    // NOT English (and bitmap tracks cannot become VTT at all) -- grabbing
+    // 0:s:0 blindly gave wrong-language or broken subtitles. Anything other
+    // than a labeled English text track falls through to whisper, which
+    // translates EVERY language to English.
+    const subStreams = info.streams.filter((st) => st.codec_type === 'subtitle');
+    let engSub = -1;
+    subStreams.forEach((st, i) => {
+        const lang = String((st.tags && st.tags.language) || '').toLowerCase();
+        if (engSub < 0 && TEXT_SUB_CODECS.has(st.codec_name) && (lang === 'eng' || lang === 'en')) engSub = i;
+    });
+    const hasSubs = engSub < 0 ? false : await new Promise((resolve) => {
+        const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:' + engSub, path.join(outDir, 'subs.vtt')]));
         if (job) job.kill = () => { try { s.kill('SIGKILL'); } catch {} };
         s.on('error', () => resolve(false)); // subtitles are optional
         s.on('close', (c) => { if (job) job.kill = null; resolve(c === 0); });
@@ -170,6 +185,10 @@ function probeWithFfmpeg(file, timeoutMs = 12000) {
                 const chm = line.match(/(\d+)\s*channels/);
                 const channels = chm ? Number(chm[1]) : (/mono/.test(line) ? 1 : /stereo/.test(line) ? 2 : 6);
                 streams.push({ codec_type: 'audio', codec_name: m[2], channels,
+                    tags: m[1] ? { language: m[1] } : undefined });
+            }
+            for (const m of err.matchAll(/Stream #\d+:\d+(?:\((\w+)\))?[^\n]*?: Subtitle: ([a-zA-Z0-9_]+)/g)) {
+                streams.push({ codec_type: 'subtitle', codec_name: m[2],
                     tags: m[1] ? { language: m[1] } : undefined });
             }
             if (!streams.length) return done(reject, new Error('probe failed'));
@@ -250,4 +269,4 @@ function startStreamConvert(outDir, { copyV, copyA }) {
     return harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', ...args]));
 }
 
-module.exports = { convert, probePartial, startStreamConvert };
+module.exports = { convert, probePartial, startStreamConvert, TEXT_SUB_CODECS };
