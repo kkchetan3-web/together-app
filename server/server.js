@@ -7,12 +7,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { convert, probePartial, startStreamConvert } = require('./lib/convert');
-const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = require('./lib/subtitles');
+const { subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, findWhisper } = require('./lib/subtitles');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.16.0-instant-multiaudio';
+const VERSION = '2.17.0-live-embedded-subs';
 
 const app = express();
 const server = http.createServer(app);
@@ -300,6 +300,46 @@ function startSubtitleJob(room, id, name, playlistName) {
 // it. Windows are serialized on the whisper queue; timestamps are shifted
 // by each window's start so the cues line up with the movie.
 const SUB_WINDOW_SEC = 120;
+// If the still-uploading file carries an embedded ENGLISH text track, show it
+// IMMEDIATELY and keep re-extracting as more of the file arrives — no whisper
+// needed, subtitles appear seconds after playback starts. Returns true when
+// an English track was found (the whisper chunk job is then skipped).
+async function startLiveEmbeddedSubs(s) {
+    if (s.subEmb || s.cancelled || !s.outDir || !s.tmp) return false;
+    const room = s.room, id = s.mediaId, name = s.name, outDir = s.outDir, tmp = s.tmp;
+    const outVtt = path.join(outDir, 'subs.vtt');
+    const partVtt = path.join(outDir, '.subemb.vtt');
+    const url = `/media/${id}/index.m3u8`;
+    const first = await extractEmbeddedPartial(tmp, partVtt).catch(() => false);
+    if (!first || s.cancelled) { fs.unlink(partVtt, () => {}); return false; }
+    const job = { cancelled: false };
+    job.cancel = () => { job.cancelled = true; };
+    trackJob(room, job);
+    s.subEmb = job;
+    let last = '', rev = 0;
+    const push = (txt) => {
+        if (job.cancelled || !txt || txt === last) return;
+        last = txt;
+        try { fs.writeFileSync(outVtt, txt); } catch { return; }
+        const st = roomState.get(room);
+        if (st && st.url === url) st.subs = `/media/${id}/subs.vtt`;
+        io.to(room).emit('player', { type: 'subs', url: `/media/${id}/subs.vtt?r=e${++rev}`, target: url });
+    };
+    io.to(room).emit('chat', { name: 'System', text: `"${name}" has English subtitles built in — showing them right away, updating as the upload continues ✅` });
+    push(first);
+    (async () => {
+        while (!job.cancelled) {
+            await new Promise((r) => setTimeout(r, 30000));
+            if (job.cancelled || !fs.existsSync(tmp)) break;
+            const txt = await extractEmbeddedPartial(tmp, partVtt).catch(() => false);
+            if (txt) push(txt);
+            if (s.finalized && s.ffExited) break; // the full-file pass in finishLiveSubtitles takes over
+        }
+        fs.unlink(partVtt, () => {});
+    })().catch(() => {}).finally(() => untrackJob(room, job));
+    return true;
+}
+
 function startLiveSubtitleChunks(s) {
     if (s.subChunks || s.cancelled || !s.outDir || !subtitlesAvailable()) return;
     const room = s.room, id = s.mediaId, name = s.name, outDir = s.outDir;
@@ -339,8 +379,11 @@ function startLiveSubtitleChunks(s) {
             const remain = dur - processed;
             // Mid-upload: keep a 5 s safety margin so ffmpeg never reads past
             // the last finished segment. At the end: drain the tail.
-            if ((!done && remain >= SUB_WINDOW_SEC + 5) || (done && remain > 1)) {
-                const len = done ? remain : Math.min(remain - 5, 300);
+            // First window is short (30 s) so the first subtitles appear fast;
+            // later windows are long (up to 300 s) for better efficiency.
+            const minWin = processed ? SUB_WINDOW_SEC : 30;
+            if ((!done && remain >= minWin + 5) || (done && remain > 1)) {
+                const len = done ? remain : Math.min(remain - 5, processed ? 300 : 60);
                 const start = processed;
                 await new Promise((res) => {
                     subsQueue = subsQueue.then(async () => {
@@ -454,6 +497,7 @@ async function finishLiveSubtitles(s) {
         const tmpVtt = outVtt + '.emb';
         const found = s.tmp && fs.existsSync(s.tmp) && await extractEmbedded(s.tmp, tmpVtt);
         if (found && !s.cancelled) {
+            if (s.subEmb) { try { s.subEmb.cancel(); } catch {} }
             if (s.subChunks) { try { s.subChunks.cancel(); } catch {} }
             try { fs.renameSync(tmpVtt, outVtt); } catch {}
             const subs = `/media/${s.mediaId}/subs.vtt`;
@@ -599,7 +643,9 @@ function announceLive(s) {
         // Same start instant for both peers -> simultaneous start.
         io.to(s.room).emit('player', { type: 'load', url, subs: null, live: true, startAt: Date.now() + 3000 });
         io.to(s.room).emit('chat', { name: 'System', text: `"${s.name}" is playing while it uploads. Both of you start together.` });
-        startLiveSubtitleChunks(s); // English subtitles begin DURING the upload
+        // English subtitles DURING the upload: embedded track when the file
+        // has one (instant, exact), whisper transcription otherwise.
+        startLiveEmbeddedSubs(s).then((found) => { if (!found) startLiveSubtitleChunks(s); }).catch(() => startLiveSubtitleChunks(s));
     } catch {}
 }
 
@@ -647,6 +693,7 @@ async function tryStartLive(s, endOffset) {
             // the room with an empty playlist and no subtitles.
             if (s.poller) { clearInterval(s.poller); s.poller = null; }
             if (s.subChunks) { try { s.subChunks.cancel(); } catch {} }
+            if (s.subEmb) { try { s.subEmb.cancel(); } catch {} }
             if (s.outDir) fs.rm(s.outDir, { recursive: true, force: true }, () => {});
             if (s.announced) io.to(s.room).emit('chat', { name: 'System', text: `Live playback of "${s.name}" hit a snag — converting it properly now, hang on.` });
             startProcessing(s.room, s.tmp, s.name); // owns (and removes) the file

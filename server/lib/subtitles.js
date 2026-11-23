@@ -101,6 +101,29 @@ async function extractEmbedded(input, outVtt) {
         .catch(() => { fs.unlink(outVtt, () => {}); return false; });
 }
 
+// Extract the English text track from a PARTIAL (still-uploading) file.
+// ffmpeg stops at the truncation point with a non-zero exit but keeps every
+// cue it already wrote — accept the output whenever it holds real cues.
+// Returns the VTT text, or false when there is no English text track yet.
+async function extractEmbeddedPartial(input, outVtt) {
+    let eng = -1;
+    try {
+        const info = await probePartial(input);
+        const subs = (info.streams || []).filter((st) => st.codec_type === 'subtitle');
+        subs.forEach((st, i) => {
+            const lang = String((st.tags && st.tags.language) || '').toLowerCase();
+            if (eng < 0 && TEXT_SUB_CODECS.has(st.codec_name) && (lang === 'eng' || lang === 'en')) eng = i;
+        });
+    } catch { return false; }
+    if (eng < 0) return false;
+    await runChild('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y',
+        '-err_detect', 'ignore_err', '-i', input, '-map', '0:s:' + eng, '-f', 'webvtt', outVtt]).catch(() => {});
+    try {
+        const txt = fs.readFileSync(outVtt, 'utf8');
+        return txt.includes('-->') ? txt : false;
+    } catch { return false; }
+}
+
 // Placeholder cues whisper emits when it cannot make out the words
 // ("(foreign language)", "[Music]", bare note symbols). They are noise, not
 // subtitles -- drop them from the live stream AND the final file.
@@ -214,4 +237,4 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
     }
 }
 
-module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, generateSubs, isJunkCue, stripJunkCues };
+module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, isJunkCue, stripJunkCues };
