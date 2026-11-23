@@ -12,7 +12,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.15.1-dep-doctor';
+const VERSION = '2.15.2-player-blackbox';
 
 const app = express();
 const server = http.createServer(app);
@@ -538,7 +538,9 @@ async function tryStartLive(s, endOffset) {
     const a = auds[0];
     if (!v) { s.live = false; return; }
     if (auds.length > 1) { s.live = false; return; } // keep ALL languages: full convert with audio renditions
-    const copyV = v.codec_name === 'h264';
+    // Copy only 8-bit h264 — 10-bit/4:2:2 h264 copies fine but Android MSE
+    // cannot decode it (broken-video icon). Anything else gets re-encoded.
+    const copyV = v.codec_name === 'h264' && v.pix_fmt === 'yuv420p';
     const copyA = !!a && a.codec_name === 'aac' && a.channels <= 2;
     s.mediaId = crypto.randomBytes(12).toString('hex');
     s.outDir = path.join(mediaDir, s.mediaId);

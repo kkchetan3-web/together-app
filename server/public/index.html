@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v59 : self-diagnosing player (explains broken-video icon) + /health dependency doctor -->
+<!-- together-ui v60 : player black box — every fatal playback error is reported in chat with a likely cause -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -939,6 +939,14 @@ if(live!==callLive){callLive=live;try{applyFilmBoost()}catch(e){}}
 }
 
 const video=$('player');
+// Black box: the broken-video icon always comes with a MediaError — say it
+// out loud in chat so playback failures are never silent again.
+video.addEventListener('error',()=>{
+const e=video.error;if(!e)return;
+const names={1:'loading aborted',2:'network error while fetching the video',3:'decode failed — this phone/browser cannot decode the video or audio codec',4:'source not supported — the URL did not return playable video'};
+sys('⚠ Player error ('+(names[e.code]||('code '+e.code))+(e.message?': '+e.message:'')+'). Screenshot this message.');
+toast('Video failed — details in chat','warn');
+});
 // Per-tab identity: lets you test host + partner in two tabs of the same browser.
 const cid=sessionStorage.cid||(sessionStorage.cid=Math.random().toString(36).slice(2)+Date.now().toString(36));
 
@@ -1573,6 +1581,19 @@ hls.on(Hls.Events.AUDIO_TRACKS_UPDATED,()=>{applyPreferredAudio();refreshAudioBt
 // Switching the audio language flushes buffers; re-assert the subtitle
 // track afterwards so CC never silently turns off.
 hls.on(Hls.Events.AUDIO_TRACK_SWITCHED,()=>{refreshAudioBtn();applyCc();});
+hls.on(Hls.Events.ERROR,(_e,data)=>{
+if(!data||!data.fatal)return;
+const what=(data.type||'?')+' / '+(data.details||'?');
+let hint='';
+if(/bufferAddCodec|fragParsing|bufferAppend|bufferIncompatible/i.test(data.details||''))hint=' Likely cause: the movie uses a codec this phone cannot play (e.g. HEVC/H.265 or unusual audio).';
+else if(/manifest/i.test(data.details||''))hint=' Likely cause: the server stopped, the link is stale, or the stream was deleted — reload the page.';
+sys('⚠ Player error: '+what+'.'+hint+' Screenshot this message.');
+toast('Video failed — details in chat','warn');
+try{
+if(data.type===Hls.ErrorTypes.NETWORK_ERROR)hls.startLoad();
+else if(data.type===Hls.ErrorTypes.MEDIA_ERROR)hls.recoverMediaError();
+}catch(_){}
+});
 refreshAudioBtn();
 if(opts.live){hls.once(Hls.Events.MANIFEST_LOADED,()=>{try{hls.startLoad(0)}catch(_){}});}
 }else{
