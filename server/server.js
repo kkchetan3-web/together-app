@@ -1,4 +1,5 @@
 const express = require('express');
+const { spawn } = require('child_process');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
@@ -11,7 +12,7 @@ const { subtitlesAvailable, extractEmbedded, generateSubs, findWhisper } = requi
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.15.0-live-english-subs';
+const VERSION = '2.15.1-dep-doctor';
 
 const app = express();
 const server = http.createServer(app);
@@ -42,6 +43,35 @@ function freeDiskBytes(dir) {
     } catch { return null; }
 }
 
+// Boot-time dependency doctor: if Termux tinkering removed ffmpeg or broke
+// node_modules, /health says EXACTLY what is wrong instead of the site
+// failing with a broken-video icon.
+const deps = {
+    ffmpeg: 'checking…',
+    ffprobe: 'checking…',
+    playerLib: fs.existsSync(path.join(ROOT, 'node_modules', 'hls.js', 'dist', 'hls.min.js'))
+        ? 'ok'
+        : 'MISSING — videos will show a broken icon. Fix: cd ~/together && npm install'
+};
+function checkBin(bin, key, required) {
+    try {
+        const c = spawn(bin, ['-version']);
+        if (c.stdout) c.stdout.resume();
+        if (c.stderr) c.stderr.resume();
+        c.on('error', () => { deps[key] = required
+            ? 'MISSING — uploads cannot convert. Fix: pkg install ffmpeg'
+            : 'missing (optional; ffmpeg fallback is used)'; });
+        c.on('close', (code) => { if (deps[key].startsWith('checking')) deps[key] = code === 0 ? 'ok' : 'broken (exit ' + code + ')'; });
+    } catch { deps[key] = 'MISSING'; }
+}
+checkBin('ffmpeg', 'ffmpeg', true);
+checkBin('ffprobe', 'ffprobe', false);
+setTimeout(() => {
+    for (const [k, v] of Object.entries(deps)) {
+        if (v !== 'ok' && !v.startsWith('missing (optional')) console.warn('[deps] ' + k + ': ' + v);
+    }
+}, 3000).unref();
+
 app.get('/health', (req, res) => {
     res.json({
         ok: true,
@@ -52,6 +82,7 @@ app.get('/health', (req, res) => {
         turnConfigured: fs.existsSync(path.join(ROOT, 'turn.txt')),
         freeDiskGB: (() => { const b = freeDiskBytes(uploadsDir); return b === null ? 'unknown' : Math.round(b / 1024 ** 3 * 10) / 10; })(),
         maxUploadGB: Math.round(MAX_UPLOAD_BYTES / 1024 ** 3),
+        dependencies: deps,
         subtitles: (() => {
             const w = findWhisper();
             if (!w) return 'generator not installed';
@@ -64,7 +95,12 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/vendor/hls.min.js', (req, res) => {
-    res.sendFile(path.join(ROOT, 'node_modules', 'hls.js', 'dist', 'hls.min.js'));
+    const f = path.join(ROOT, 'node_modules', 'hls.js', 'dist', 'hls.min.js');
+    if (!fs.existsSync(f)) {
+        return res.status(503).type('text')
+            .send('hls.js is missing on the server (node_modules broken or deleted). Fix: cd ~/together && npm install, then restart.');
+    }
+    res.sendFile(f);
 });
 
 app.use(express.static(path.join(ROOT, 'public')));

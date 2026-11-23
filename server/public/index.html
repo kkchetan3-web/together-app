@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v58 : CC survives audio switching · English-only subtitle policy · live chunked transcription -->
+<!-- together-ui v59 : self-diagnosing player (explains broken-video icon) + /health dependency doctor -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1575,7 +1575,15 @@ hls.on(Hls.Events.AUDIO_TRACKS_UPDATED,()=>{applyPreferredAudio();refreshAudioBt
 hls.on(Hls.Events.AUDIO_TRACK_SWITCHED,()=>{refreshAudioBtn();applyCc();});
 refreshAudioBtn();
 if(opts.live){hls.once(Hls.Events.MANIFEST_LOADED,()=>{try{hls.startLoad(0)}catch(_){}});}
-}else video.src=url;
+}else{
+// hls.js missing (broken node_modules on the server) + no native HLS =
+// Android shows a broken-media icon with zero explanation. Say WHY.
+if(url.includes('.m3u8')&&!window.Hls&&!video.canPlayType('application/vnd.apple.mpegurl')){
+sys('⚠ The video player library (hls.js) failed to load from the server, so the movie cannot play (this causes the broken-video icon). On the server phone run:  cd ~/together && npm install  then restart the server and reload this page.');
+toast('Player library missing — see chat for the fix','warn');
+}
+video.src=url;
+}
 if(opts.startAt){
 // Both peers receive the same absolute start instant -> simultaneous start.
 const delay=Math.max(0,opts.startAt-Date.now());
