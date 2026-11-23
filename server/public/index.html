@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Together</title>
-<!-- together-ui v61 : multi-audio movies play instantly while uploading; all-languages version swaps in seamlessly -->
+<!-- together-ui v62 : pause/play sync bulletproof — typed echo guard + paused-state heartbeat reconciliation -->
 <meta name="color-scheme" content="dark light">
 <script>
 // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -1001,15 +1001,21 @@ let remote=false,hls=null,resumeAfter=false;
 // ping-ponging both players to stale positions (the "random jump" bug).
 // Instead we count the remote operations we are applying and consume one per
 // resulting media event, with a safety net only as a fallback.
-let remoteOps=0,remoteSafety=null,loadingMedia=false,loadSafety=null,pendingSeek=null;
-function holdRemote(n){
-remoteOps+=(n||1);remote=true;
+let remoteOps=[],remoteSafety=null,loadingMedia=false,loadSafety=null,pendingSeek=null,ytEchoT=null;
+function holdRemote(kind){
+remoteOps.push(kind);remote=true;
 if(remoteSafety)clearTimeout(remoteSafety);
-remoteSafety=setTimeout(()=>{remoteOps=0;remote=false;remoteSafety=null;},3000);
+remoteSafety=setTimeout(()=>{remoteOps=[];remote=false;remoteSafety=null;},3000);
 }
-function consumeRemote(){
-if(remoteOps>0)remoteOps--;
-if(remoteOps<=0){remoteOps=0;remote=false;if(remoteSafety){clearTimeout(remoteSafety);remoteSafety=null}}
+// Returns true only if this event is the echo of a remote command of the
+// SAME kind. A user pause during a remote seek (or a sync heartbeat) is a
+// real action and must be forwarded — the old counter swallowed those.
+function consumeRemote(kind){
+const i=remoteOps.indexOf(kind);
+if(i<0)return false;
+remoteOps.splice(i,1);
+if(!remoteOps.length){remote=false;if(remoteSafety){clearTimeout(remoteSafety);remoteSafety=null}}
+return true;
 }
 function beginLoad(){
 loadingMedia=true;pendingSeek=null;
@@ -1568,7 +1574,7 @@ toast('Audio: '+audioTrackLabel(t,i),'ok');
 function loadSource(url,opts){
 opts=opts||{};
 beginLoad();
-remoteOps=0;remote=false;
+remoteOps=[];remote=false;
 stopYouTube();
 video.style.display='block';
 if(hls){hls.destroy();hls=null}
@@ -1714,22 +1720,22 @@ socket.emit('player',{type:'load',url,subs:null});
 sys('You loaded a video');
 };
 const send=(type)=>{
-if(remote||loadingMedia||ytMode)return;
+if(loadingMedia||ytMode)return;
 if(!video.currentSrc&&!video.src)return;
 if(!Number.isFinite(video.currentTime))return;
 socket.emit('player',{type,time:video.currentTime});
 };
 // Consume the guard on the real media event instead of a blind timer.
-video.addEventListener('play',()=>{if(remote){consumeRemote();return}send('play')});
-video.addEventListener('pause',()=>{if(remote){consumeRemote();return}send('pause')});
-video.addEventListener('seeked',()=>{if(remote){consumeRemote();return}send('seek')});
+video.addEventListener('play',()=>{if(consumeRemote('play'))return;send('play')});
+video.addEventListener('pause',()=>{if(consumeRemote('pause'))return;send('pause')});
+video.addEventListener('seeked',()=>{if(consumeRemote('seeked'))return;send('seek')});
 video.addEventListener('loadedmetadata',endLoad);
 video.addEventListener('canplay',endLoad);
 video.addEventListener('waiting',()=>{if(!remote&&!loadingMedia)socket.emit('player',{type:'buffering'})});
 video.addEventListener('playing',()=>{if(!remote&&!loadingMedia)socket.emit('player',{type:'ready'})});
 $('syncBtn').onclick=()=>{socket.emit('player',{type:'seek',time:mediaTime()});sys('Synced partner to your position')};
 
-socket.on('player',({type,time,url,subs,kind,videoId,live,startAt,target,resume,replace})=>{
+socket.on('player',({type,time,url,subs,kind,videoId,live,startAt,target,resume,replace,paused})=>{
 if(type==='vod'){sys('Upload finished — the full video is now available.');return}
 if(type==='load'){
 if(kind==='youtube'&&videoId){
@@ -1778,8 +1784,12 @@ const it=playlist.find(p=>p.url===target);if(it)it.subs=url;
 return;
 }
 if(type==='delete'){stopYouTube();video.style.display='block';if(hls){hls.destroy();hls=null}refreshAudioBtn();video.removeAttribute('src');video.load();playlist=[];currentIdx=-1;renderQueue();uploadInProgress=false;resetUploadUI();sys('The video was deleted.');return}
-remote=true;
 if(ytMode&&yt){
+// YT has no per-event echo consumption: suppress echoes with a short
+// timed window that ALWAYS clears (the old flag could stay stuck on).
+remote=true;
+if(ytEchoT)clearTimeout(ytEchoT);
+ytEchoT=setTimeout(()=>{remote=false;ytEchoT=null;},1500);
 if(type==='buffering'){resumeAfter=!ytPaused();yt.pauseVideo()}
 else if(type==='ready'){if(resumeAfter){yt.playVideo();resumeAfter=false}}
 else{
@@ -1788,18 +1798,20 @@ if(type==='play')ytPlay();
 if(type==='pause')yt.pauseVideo();
 }
 }else{
-if(type==='buffering'){resumeAfter=!video.paused;if(!video.paused){holdRemote(1);video.pause()}}
-else if(type==='ready'){if(resumeAfter){holdRemote(1);safePlay(video);resumeAfter=false}}
+if(type==='buffering'){resumeAfter=!video.paused;if(!video.paused){holdRemote('pause');video.pause()}}
+else if(type==='ready'){if(resumeAfter){if(video.paused){holdRemote('play');safePlay(video)}resumeAfter=false}}
 else{
-let ops=0;
 const wantSeek=(time!=null&&video.readyState>=1&&Math.abs(video.currentTime-time)>(type==='sync'?1.5:0.4));
 if(time!=null&&video.readyState<1)pendingSeek=time; // apply once the source is readable
-if(wantSeek)ops++;
-if(type==='play'||type==='pause')ops++;
-if(ops)holdRemote(ops);
-if(wantSeek){try{video.currentTime=time}catch(_){consumeRemote()}}
-if(type==='play')safePlay(video);
-if(type==='pause')video.pause();
+if(wantSeek){holdRemote('seeked');try{video.currentTime=time}catch(_){consumeRemote('seeked')}}
+if(type==='play'&&video.paused){holdRemote('play');safePlay(video)}
+if(type==='pause'&&!video.paused){holdRemote('pause');video.pause()}
+// Safety net: the heartbeat carries the sender's paused state. If a
+// play/pause message ever got lost, converge within 5 seconds.
+if(type==='sync'&&typeof paused==='boolean'&&!loadingMedia){
+if(paused&&!video.paused){holdRemote('pause');video.pause()}
+else if(!paused&&video.paused&&!resumeAfter){holdRemote('play');safePlay(video)}
+}
 }
 }
 });
@@ -1810,7 +1822,9 @@ else if(msg.action==='current'){currentIdx=msg.idx;renderQueue()}
 });
 
 setInterval(()=>{
-if(pc&&!polite&&mediaPlaying())socket.emit('player',{type:'sync',time:mediaTime()});
+if(!pc||polite)return;
+const loaded=ytMode?!!yt:(video.readyState>=1&&!!(video.currentSrc||video.src));
+if(loaded)socket.emit('player',{type:'sync',time:mediaTime(),paused:!mediaPlaying()});
 },5000);
 
 function fmtSize(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB'}
