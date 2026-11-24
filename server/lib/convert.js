@@ -147,7 +147,7 @@ async function convert(inputFile, outDir, onProgress, job) {
         const lang = String((st.tags && st.tags.language) || '').toLowerCase();
         if (engSub < 0 && TEXT_SUB_CODECS.has(st.codec_name) && (lang === 'eng' || lang === 'en')) engSub = i;
     });
-    const hasSubs = engSub < 0 ? false : await new Promise((resolve) => {
+    let hasSubs = engSub < 0 ? false : await new Promise((resolve) => {
         const s = harden(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y', '-i', inputFile, '-map', '0:s:' + engSub, path.join(outDir, 'subs.vtt')]));
         if (job) job.kill = () => { try { s.kill('SIGKILL'); } catch {} };
         s.on('error', () => resolve(false)); // subtitles are optional
@@ -155,6 +155,17 @@ async function convert(inputFile, outDir, onProgress, job) {
     });
     if (isCancelled()) throw bail();
 
+    if (hasSubs) {
+        // A 'forced' English track (signs-only, a few cues per movie) must not
+        // count as real subtitles — fall through to whisper generation.
+        try {
+            const { vttSparse } = require('./subtitles');
+            if (vttSparse(fs.readFileSync(path.join(outDir, 'subs.vtt'), 'utf8'))) {
+                fs.unlinkSync(path.join(outDir, 'subs.vtt'));
+                hasSubs = false;
+            }
+        } catch {}
+    }
     return { duration, hasSubs, playlist: multi ? 'master.m3u8' : 'index.m3u8', audioTracks: auds.length };
 }
 

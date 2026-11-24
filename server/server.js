@@ -7,12 +7,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { convert, probePartial, startStreamConvert } = require('./lib/convert');
-const { subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, findWhisper } = require('./lib/subtitles');
+const { subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, findWhisper, vttSparse } = require('./lib/subtitles');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const VERSION = '2.17.0-live-embedded-subs';
+const VERSION = '2.17.1-subtitle-quality';
 
 const app = express();
 const server = http.createServer(app);
@@ -247,7 +247,7 @@ function startSubtitleJob(room, id, name, playlistName) {
             io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles, and the subtitle generator (whisper.cpp) isn't installed on this server yet.` });
             return;
         }
-        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — live English subtitles are being generated. They'll start appearing on screen in a moment and fill in as the movie is transcribed.` });
+        io.to(room).emit('chat', { name: 'System', text: `"${name}" has no subtitles — live English subtitles are being generated. They'll start appearing on screen in a moment and fill in as the movie is transcribed.` + whisperModelNote() });
         io.to(room).emit('subs', { state: 'start', name });
         // Real-time mode: whisper hands us each finished line as it works.
         // We grow subs.vtt on disk and re-announce it every few seconds (with
@@ -300,6 +300,16 @@ function startSubtitleJob(room, id, name, playlistName) {
 // it. Windows are serialized on the whisper queue; timestamps are shifted
 // by each window's start so the cues line up with the movie.
 const SUB_WINDOW_SEC = 120;
+
+// Subtitle quality is only as good as the whisper model on this phone. Name
+// it in chat, and spell out the fix when it's one that translates poorly.
+function whisperModelNote() {
+    const w = findWhisper();
+    if (!w) return '';
+    const m = path.basename(w.model);
+    const weak = w.englishOnly || /tiny|base/.test(m);
+    return ` (model: ${m}${weak ? ' — this model translates foreign-language audio POORLY. For Korean/Hindi/etc. install the better one: cd ~/whisper.cpp && bash ./models/download-ggml-model.sh small' : ''})`;
+}
 // If the still-uploading file carries an embedded ENGLISH text track, show it
 // IMMEDIATELY and keep re-extracting as more of the file arrives — no whisper
 // needed, subtitles appear seconds after playback starts. Returns true when
@@ -333,6 +343,19 @@ async function startLiveEmbeddedSubs(s) {
             if (job.cancelled || !fs.existsSync(tmp)) break;
             const txt = await extractEmbeddedPartial(tmp, partVtt).catch(() => false);
             if (txt) push(txt);
+            else {
+                // Enough of the movie arrived to reveal this is a 'forced'
+                // (signs-only) track, not dialogue — switch to whisper now.
+                let sparse = false;
+                try { sparse = vttSparse(fs.readFileSync(partVtt, 'utf8')); } catch {}
+                if (sparse && !job.cancelled && !s.cancelled) {
+                    job.cancelled = true;
+                    s.subEmb = null;
+                    io.to(room).emit('chat', { name: 'System', text: `The built-in English track of "${name}" only covers signs and foreign lines — switching to full English transcription.` });
+                    startLiveSubtitleChunks(s);
+                    break;
+                }
+            }
             if (s.finalized && s.ffExited) break; // the full-file pass in finishLiveSubtitles takes over
         }
         fs.unlink(partVtt, () => {});
@@ -367,10 +390,10 @@ function startLiveSubtitleChunks(s) {
         io.to(room).emit('player', { type: 'subs', url: subs + '?r=' + (++rev), target: url });
     };
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    let processed = 0;
+    let processed = 0, winFails = 0;
     (async () => {
         io.to(room).emit('subs', { state: 'start', name });
-        io.to(room).emit('chat', { name: 'System', text: `Generating English subtitles for "${name}" chunk-by-chunk while it uploads…` });
+        io.to(room).emit('chat', { name: 'System', text: `Generating English subtitles for "${name}" chunk-by-chunk while it uploads…` + whisperModelNote() });
         while (!job.cancelled) {
             let txt = '';
             try { txt = fs.readFileSync(playlistFile, 'utf8'); } catch { break; } // deleted / replaced
@@ -385,16 +408,27 @@ function startLiveSubtitleChunks(s) {
             if ((!done && remain >= minWin + 5) || (done && remain > 1)) {
                 const len = done ? remain : Math.min(remain - 5, processed ? 300 : 60);
                 const start = processed;
+                const mark = cues.length;
+                let ok = false;
                 await new Promise((res) => {
                     subsQueue = subsQueue.then(async () => {
                         if (job.cancelled) return;
-                        await generateSubs(playlistFile, winVtt, {
+                        ok = await generateSubs(playlistFile, winVtt, {
                             window: { start, length: len },
                             onSegment: (cue) => cues.push(cue),
                             job,
-                        }).catch(() => {});
+                        }).then(() => true).catch(() => false);
                     }).catch(() => {}).finally(res);
                 });
+                if (!ok && !job.cancelled) {
+                    // A failed window must NEVER be skipped — that leaves a
+                    // permanent hole in the subtitles. Drop its partial cues
+                    // and retry the same window (give up only after 3 tries).
+                    cues.length = mark;
+                    winFails++;
+                    if (winFails <= 3) { await sleep(3000); continue; }
+                }
+                winFails = 0;
                 processed = start + len;
                 push();
                 if (dur > 0) io.to(room).emit('subs', { state: 'progress', percent: Math.min(99, Math.round((processed / Math.max(dur, 1)) * 100)), name });

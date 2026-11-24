@@ -96,9 +96,30 @@ async function extractEmbedded(input, outVtt) {
     return runChild('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostats', '-y',
         '-i', input, '-map', '0:s:' + eng, outVtt])
         .then(() => {
-            try { return fs.statSync(outVtt).size > 10; } catch { return false; }
+            try {
+                const txt = fs.readFileSync(outVtt, 'utf8');
+                if (txt.length <= 10) return false;
+                if (vttSparse(txt)) { fs.unlink(outVtt, () => {}); return false; } // forced track -> whisper instead
+                return true;
+            } catch { return false; }
         })
         .catch(() => { fs.unlink(outVtt, () => {}); return false; });
+}
+
+// A 'forced' subtitle track only translates on-screen signs and occasional
+// foreign lines — a handful of cues across a whole movie. Reusing one as THE
+// subtitles makes most of the film look 'skipped'. Density check: a real
+// dialogue track has at least ~1 cue per 30 s; only applied once the cues
+// span 10+ minutes so shorts and partial extractions are never misjudged.
+function vttSparse(txt) {
+    const times = [...String(txt).matchAll(/(\d+):(\d+):(\d+)[.,](\d+)|(\d+):(\d+)[.,](\d+)/g)];
+    if (!times.length) return false;
+    const toSec = (m) => m[1] !== undefined
+        ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000
+        : (+m[5]) * 60 + (+m[6]) + (+m[7]) / 1000;
+    const span = Math.max(...times.map(toSec));
+    const cues = (String(txt).match(/-->/g) || []).length;
+    return span > 600 && cues / span < 1 / 30;
 }
 
 // Extract the English text track from a PARTIAL (still-uploading) file.
@@ -120,7 +141,9 @@ async function extractEmbeddedPartial(input, outVtt) {
         '-err_detect', 'ignore_err', '-i', input, '-map', '0:s:' + eng, '-f', 'webvtt', outVtt]).catch(() => {});
     try {
         const txt = fs.readFileSync(outVtt, 'utf8');
-        return txt.includes('-->') ? txt : false;
+        if (!txt.includes('-->')) return false;
+        if (vttSparse(txt)) return false; // forced track -> let whisper handle it
+        return txt;
     } catch { return false; }
 }
 
@@ -237,4 +260,4 @@ async function generateSubs(input, outVtt, { duration = 0, onProgress, onSegment
     }
 }
 
-module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, isJunkCue, stripJunkCues };
+module.exports = { findWhisper, subtitlesAvailable, extractEmbedded, extractEmbeddedPartial, generateSubs, isJunkCue, stripJunkCues, vttSparse };
